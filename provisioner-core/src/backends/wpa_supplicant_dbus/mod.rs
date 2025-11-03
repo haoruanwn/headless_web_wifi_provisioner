@@ -9,6 +9,9 @@ use std::convert::TryInto;
 use zbus::{Connection};
 use zbus::zvariant::{OwnedValue, ObjectPath};
 use futures_util::stream::StreamExt;
+// DHCP implementation for provisioning mode
+#[cfg(feature = "backend_wpa_dbus")]
+mod dhcp;
 
 const IFACE_NAME: &str = "wlan0";
 const AP_IP_ADDR: &str = "192.168.4.1/24";
@@ -48,6 +51,8 @@ trait WpaInterface {
 pub struct DbusBackend {
     hostapd_pid: Arc<Mutex<Option<u32>>>,
     connection: Connection,
+    #[cfg(feature = "backend_wpa_dbus")]
+    dhcp_task: Arc<Mutex<Option<(tokio::sync::oneshot::Sender<()>, tokio::task::JoinHandle<()>)>>>,
 }
 
 impl DbusBackend {
@@ -56,11 +61,13 @@ impl DbusBackend {
         Ok(Self {
             hostapd_pid: Arc::new(Mutex::new(None)),
             connection,
+            #[cfg(feature = "backend_wpa_dbus")]
+            dhcp_task: Arc::new(Mutex::new(None)),
         })
     }
 
     /// Finds the D-Bus object path for our wireless interface (e.g., wlan0)
-    async fn get_iface_proxy(&self) -> Result<WpaInterfaceProxy> {
+    async fn get_iface_proxy(&self) -> Result<WpaInterfaceProxy<'_>> {
         let supplicant_proxy = WpaSupplicantProxy::new(&self.connection, WPA_S_SERVICE, WPA_S_PATH).await?;
         let iface_paths = supplicant_proxy.interfaces().await?;
 
@@ -98,12 +105,23 @@ impl ProvisioningBackend for DbusBackend {
         } else {
             return Err(Error::CommandFailed("Could not get PID for hostapd process".to_string()));
         }
+        // Start DHCP server (edge-dhcp) when provisioning mode is entered.
+        #[cfg(feature = "backend_wpa_dbus")]
+        {
+            self.start_dhcp_server().await?;
+        }
         Ok(())
     }
 
     async fn exit_provisioning_mode(&self) -> Result<()> {
         println!("📡 [DbusBackend] Exiting provisioning mode...");
         
+        // Stop DHCP server first if running
+        #[cfg(feature = "backend_wpa_dbus")]
+        {
+            self.stop_dhcp_server().await?;
+        }
+
         let pid_to_kill = { *self.hostapd_pid.lock().unwrap() };
 
         if let Some(pid) = pid_to_kill {
@@ -185,3 +203,29 @@ impl ProvisioningBackend for DbusBackend {
         Ok(())
     }
 }
+
+// DHCP server control (starts/stops edge-dhcp in a background task)
+#[cfg(feature = "backend_wpa_dbus")]
+impl DbusBackend {
+    async fn start_dhcp_server(&self) -> Result<()> {
+        // In-process minimal DHCP responder
+        let ip_str = AP_IP_ADDR.split('/').next().unwrap_or(AP_IP_ADDR);
+        let ap_ip: std::net::Ipv4Addr = ip_str.parse().map_err(|e| Error::CommandFailed(format!("Invalid AP IP: {}", e)))?;
+
+        let (shutdown_tx, handle) = crate::backends::wpa_supplicant_dbus::dhcp::spawn_server(ap_ip);
+        *self.dhcp_task.lock().unwrap() = Some((shutdown_tx, handle));
+        tracing::info!("Started in-process mini DHCP responder");
+        Ok(())
+    }
+
+    async fn stop_dhcp_server(&self) -> Result<()> {
+        let opt = self.dhcp_task.lock().unwrap().take();
+        if let Some((shutdown_tx, handle)) = opt {
+            tracing::info!("Stopping in-process mini DHCP responder...");
+            let _ = shutdown_tx.send(());
+            let _ = handle.await;
+        }
+        Ok(())
+    }
+}
+

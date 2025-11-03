@@ -5,5 +5,7 @@
 #[cfg(feature = "backend_mock")]
 pub mod provider_disk;
 
-#[cfg(not(feature = "backend_mock"))]
+// Only include the embedded frontend when we're not using the mock backend
+// and when a UI theme feature (which provides embedded assets) is enabled.
+#[cfg(all(not(feature = "backend_mock"), any(feature = "ui_bootstrap", feature = "ui_simple")))]
 pub mod provider_embed;

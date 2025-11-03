@@ -9,21 +9,28 @@ edition.workspace = true
 tokio = { workspace = true, features = ["full"] }
 axum.workspace = true
 serde = { workspace = true, features = ["derive"] }
-serde_json = { workspace = true, optional = true }
+serde_json = { workspace = true }
 thiserror.workspace = true
 tracing.workspace = true
 async-trait.workspace = true
-leasehund.workspace = true # DHCP
+anyhow = "1.0"
+log = { version = "0.4", optional = false }
+# DHCP implementation is in-provisioner-core backend now; no external edge-dhcp dependency
 
 # === 可选依赖 (由 Features 控制) ===
 zbus = { workspace = true, optional = true }
 zbus_macros = { workspace = true, optional = true }
 futures-util = { version = "0.3", optional = true }
+libc = { version = "0.2", optional = true }
+edge-nal = { version = "0.5", optional = true }
+edge-raw = { version = "0.6", optional = true }
+embedded-io-async = { version = "0.6", optional = true }
+# DHCP runner is now implemented inside this crate's backend; no external runner required
 
 # --- 交付方式依赖 ---
-rust-embed = { workspace = true, optional = true }
+rust-embed = { workspace = true }
 tower-http = { workspace = true, optional = true } # for DiskFrontend
-mime_guess = { workspace = true, optional = true }
+mime_guess = { workspace = true }
 
 
 [features]
@@ -31,9 +38,9 @@ mime_guess = { workspace = true, optional = true }
 default = []
 
 # === 1. 后端实现选择 (隐式决定交付方式) ===
-backend_wpa_dbus = ["dep:zbus", "dep:zbus_macros", "dep:rust-embed", "dep:mime_guess", "dep:serde_json", "dep:futures-util"] # Real backend -> embed
-backend_systemd = ["dep:rust-embed", "dep:mime_guess", "dep:serde_json"]             # Real backend -> embed
-backend_mock = ["dep:tower-http", "dep:mime_guess", "dep:serde_json"]                # Mock backend -> disk
+backend_wpa_dbus = ["zbus", "zbus_macros", "futures-util", "libc"] # Real backend -> embed
+backend_systemd = []             # Real backend -> embed (uses always-present deps)
+backend_mock = ["dep:tower-http"]                # Mock backend -> disk
 
 # === 2. UI 主题选择 ===
 ui_bootstrap = []

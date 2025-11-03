@@ -2,6 +2,7 @@
 members = [
     "provisioner-core",
     "provisioner-daemon",
+    # dhcp-runner moved into provisioner-core backend implementation; removed from workspace members
 ]
 
 [workspace.package]
@@ -21,8 +22,7 @@ async-trait = "0.1"
 
 
 # DHCP 服务器
-edge-dhcp = "0.6.0"
-leasehund = "0.1.0"
+# edge-dhcp/provisioner-dhcp-runner removed; DHCP implemented inside provisioner-core backend
 # D-Bus 后端
 zbus = { version = "5.12.0" }
 # Procedural macros for zbus (separated crate starting with zbus 5.x)
