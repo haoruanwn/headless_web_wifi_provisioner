@@ -1,0 +1,42 @@
+[workspace]
+members = [
+    "provisioner-core",
+    "provisioner-daemon",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+authors = ["Your Name <you@example.com>"]
+license = "MIT OR Apache-2.0"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["full"] }
+axum = "0.8.6"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2.0.17"
+tracing = "0.1"
+async-trait = "0.1"
+
+
+# DHCP 服务器
+edge-dhcp = "0.6.0"
+leasehund = "0.1.0"
+# D-Bus 后端
+zbus = { version = "5.12.0" }
+# 前端：嵌入
+rust-embed = { version = "8" }
+mime_guess = "2"
+# 前端：磁盘 (调试用)
+tower-http = { version = "0.6.6", features = ["fs"] }
+
+
+#
+# (关键) 为嵌入式目标优化 Release 构建
+#
+[profile.release]
+panic = "abort"     # 发生 panic 时直接终止，减小二进制体积
+codegen-units = 1   # 优化：更好的内联和优化，但编译更慢
+lto = "fat"         # 优化：全程序链接时优化 (Link-Time Optimization)
+strip = true        # 优化：自动剥离调试符号 (等同于 `strip` 命令)
+opt-level = "z"     # 优化：最大化减小二进制体积 (Size)

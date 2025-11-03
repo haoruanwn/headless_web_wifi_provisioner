@@ -1,0 +1,39 @@
+[package]
+name = "provisioner-core"
+# 版本和 edition 会自动从 workspace 继承
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+# 核心依赖 (始终需要)
+# 注意：我们不再需要 "0.7" 这样的版本号了
+tokio = { workspace = true, features = ["full"] }
+axum.workspace = true
+serde = { workspace = true, features = ["derive"] }
+thiserror.workspace = true
+tracing.workspace = true
+async-trait.workspace = true
+leasehund.workspace = true # DHCP
+
+# === 可选依赖 (由 Features 控制) ===
+zbus = { workspace = true, optional = true }          # D-Bus
+rust-embed = { workspace = true, optional = true }
+tower-http = { workspace = true, optional = true }
+mime_guess = { workspace = true, optional = true }
+
+
+[features]
+# 默认特性为空
+default = []
+
+# === 1. 后端实现选择 (必须选一个) ===
+backend_dbus = ["dep:zbus"]
+backend_mock = [] 
+
+# === 2. 前端实现选择 (必须选一个) ===
+frontend_embed = ["dep:rust-embed", "dep:mime_guess"]
+frontend_disk = ["dep:tower-http", "dep:mime_guess"]
+
+# === 3. "便捷"组合包 (方便构建) ===
+release_build = ["backend_dbus", "frontend_embed"]
+debug_build = ["backend_mock", "frontend_disk"]

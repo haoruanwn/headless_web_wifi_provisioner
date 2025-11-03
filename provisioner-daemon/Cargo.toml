@@ -1,0 +1,31 @@
+[package]
+name = "provisioner-daemon"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+# 启动器运行时
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+
+#
+# === 关键的结合点 ===
+#
+# 1. 我们依赖本地的 `provisioner-core` Crate
+provisioner-core = { path = "../provisioner-core", default-features = false }
+
+
+[features]
+# 我们定义自己的特性，然后"转发" (forward) 给 core Crate。
+# 这让我们可以从顶层控制所有编译。
+
+# 生产构建：激活 core 里的 D-Bus 和 Embed 特性
+release_build = [
+    "provisioner-core/backend_dbus",
+    "provisioner-core/frontend_embed"
+]
+
+# 调试构建：激活 core 里的 Mock 和 Disk 特性
+debug_build = [
+    "provisioner-core/backend_mock",
+    "provisioner-core/frontend_disk"
+]
