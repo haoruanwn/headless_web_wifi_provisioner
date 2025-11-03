@@ -15,12 +15,16 @@ jobs:
   build-and-release:
     name: "Build & Release Assets"
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: write # 允许此Job创建Release和上传Assets
     
     strategy:
       matrix:
         include:
           - target: armv7-unknown-linux-musleabihf
-            asset_suffix: armv7-musleabihf
+          # 添加release的文件后缀以区分不同架构的二进制文件
+            asset_suffix: echo_mate_armv7-musleabihf
             features: "provisioner-daemon/backend_wpa_dbus,provisioner-daemon/ui_bootstrap"
             env_rustflags: "-C target-feature=+crt-static"
 
