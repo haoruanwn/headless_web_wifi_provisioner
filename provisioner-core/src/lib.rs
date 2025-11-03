@@ -1,14 +1,35 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
+//! Core library for the headless Wi-Fi provisioner.
+//! This crate defines the core traits (interfaces) and data structures,
+//! and provides different implementations for backends (Wi-Fi control)
+//! and frontends (UI asset delivery) controlled by feature flags.
+
+pub mod traits;
+pub mod backends;
+pub mod frontends;
+pub mod web_server;
+
+// Define a shared Error and Result type for the entire crate.
+
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("I/O error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("Web server error: {0}")]
+    WebServer(#[from] axum::BoxError),
+
+    #[error("Asset not found: {0}")]
+    AssetNotFound(String),
+
+    // Add other specific error types here as needed.
+    // For example, when we add the D-Bus backend:
+    //
+    // #[cfg(feature = "backend_dbus")]
+    // #[error("D-Bus error: {0}")]
+    // Dbus(#[from] zbus::Error),
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+/// A specialized `Result` type for this crate's operations.
+pub type Result<T> = std::result::Result<T, Error>;

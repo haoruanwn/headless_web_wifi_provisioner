@@ -1,34 +1,43 @@
-# [cfg(feature = "frontend_disk")] // 只在启用此特性时编译
-mod disk_impl {
-    use crate::traits::UiAssetProvider;
-    use async_trait::async_trait;
-    use axum::response::IntoResponse;
-    use tower_http::services::ServeFile;
-    use std::path::PathBuf;
-    use axum::http::{Request, StatusCode};
-    use axum::body::Body;
 
-    // 假设 UI 目录在项目根目录
-    const UI_DIR: &str = "../ui";
+use crate::traits::UiAssetProvider;
+use crate::{Error, Result};
+use async_trait::async_trait;
+use std::borrow::Cow;
+use std::path::PathBuf;
+use tokio::fs;
 
-    pub struct DiskFrontend;
+/// A UI asset provider that reads files directly from disk.
+/// Ideal for development, as it allows for live reloading of UI assets.
+pub struct DiskFrontend {
+    pub ui_dir: PathBuf,
+}
 
-    #[async_trait]
-    impl UiAssetProvider for DiskFrontend {
-        async fn get_asset(&self, path: &str) -> Result<impl IntoResponse, impl IntoResponse> {
-            let path = if path.is_empty() { "index.html" } else { path };
-            let file_path = PathBuf::from(UI_DIR).join(path);
-            
-            // 使用 tower-http 的 ServeFile 来安全地提供文件服务
-            let request = Request::builder().body(Body::empty()).unwrap();
-            match ServeFile::new(file_path).oneshot(request).await {
-                Ok(response) => Ok(response.map(axum::body::boxed)),
-                Err(_) => Err((StatusCode::NOT_FOUND, "Not Found")),
-            }
-        }
+impl DiskFrontend {
+    /// Creates a new `DiskFrontend`.
+    ///
+    /// # Arguments
+    /// * `ui_dir` - The path to the directory containing the UI files (e.g., "ui/").
+    pub fn new(ui_dir: PathBuf) -> Self {
+        Self { ui_dir }
     }
 }
 
-// 条件化地导出
-#[cfg(feature = "frontend_disk")]
-pub use disk_impl::DiskFrontend;
+#[async_trait]
+impl UiAssetProvider for DiskFrontend {
+    async fn get_asset(&self, path: &str) -> Result<(Cow<'static, [u8]>, String)> {
+        // Sanitize the path to prevent directory traversal attacks
+        let asset_path = self.ui_dir.join(path);
+
+        // Read the file from disk
+        let content = fs::read(asset_path)
+            .await
+            .map_err(|_| Error::AssetNotFound(path.to_string()))?;
+
+        // Guess the MIME type based on the file extension
+        let mime = mime_guess::from_path(path)
+            .first_or_octet_stream()
+            .to_string();
+
+        Ok((Cow::Owned(content), mime))
+    }
+}

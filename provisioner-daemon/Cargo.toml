@@ -4,6 +4,8 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+anyhow = "1.0"
+tracing-subscriber = "0.3"
 # 启动器运行时
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 
@@ -20,12 +22,10 @@ provisioner-core = { path = "../provisioner-core", default-features = false }
 
 # 生产构建：激活 core 里的 D-Bus 和 Embed 特性
 release_build = [
-    "provisioner-core/backend_dbus",
-    "provisioner-core/frontend_embed"
+    "provisioner-core/release_build"
 ]
 
 # 调试构建：激活 core 里的 Mock 和 Disk 特性
 debug_build = [
-    "provisioner-core/backend_mock",
-    "provisioner-core/frontend_disk"
+    "provisioner-core/debug_build"
 ]

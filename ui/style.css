@@ -1,0 +1,28 @@
+body {
+    background-color: #f0f2f5;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+.container {
+    max-width: 600px;
+}
+
+.card {
+    border: none;
+}
+
+.list-group-item-action {
+    font-weight: 500;
+}
+
+.list-group-item-action:hover, .list-group-item-action:focus {
+    background-color: #e9ecef;
+}
+
+#refresh-btn i {
+    transition: transform 0.5s ease;
+}
+
+#refresh-btn.loading i {
+    transform: rotate(360deg);
+}

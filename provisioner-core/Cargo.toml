@@ -10,6 +10,7 @@ edition.workspace = true
 tokio = { workspace = true, features = ["full"] }
 axum.workspace = true
 serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, optional = true }
 thiserror.workspace = true
 tracing.workspace = true
 async-trait.workspace = true
@@ -31,8 +32,8 @@ backend_dbus = ["dep:zbus"]
 backend_mock = [] 
 
 # === 2. 前端实现选择 (必须选一个) ===
-frontend_embed = ["dep:rust-embed", "dep:mime_guess"]
-frontend_disk = ["dep:tower-http", "dep:mime_guess"]
+frontend_embed = ["dep:rust-embed", "dep:mime_guess", "dep:serde_json"]
+frontend_disk = ["dep:tower-http", "dep:mime_guess", "dep:serde_json"]
 
 # === 3. "便捷"组合包 (方便构建) ===
 release_build = ["backend_dbus", "frontend_embed"]
