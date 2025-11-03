@@ -111,7 +111,15 @@ async fn api_connect_wifi(
     Json(payload): Json<ConnectRequest>,
 ) -> impl IntoResponse {
     match state.backend.connect(&payload.ssid, &payload.password).await {
-        Ok(_) => (StatusCode::OK, Json(serde_json::json!({ "status": "success" }))).into_response(),
+        Ok(_) => {
+            println!("Wi-Fi connection successful, exiting provisioning mode.");
+            // On successful connection, tear down the AP
+            if let Err(e) = state.backend.exit_provisioning_mode().await {
+                eprintln!("Error exiting provisioning mode: {}", e);
+                // Fall through to return success to the user anyway, as Wi-Fi is connected.
+            }
+            (StatusCode::OK, Json(serde_json::json!({ "status": "success" }))).into_response()
+        },
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": e.to_string() })),

@@ -17,6 +17,16 @@ impl SystemdNetworkdBackend {
 
 #[async_trait]
 impl ProvisioningBackend for SystemdNetworkdBackend {
+    async fn enter_provisioning_mode(&self) -> Result<()> {
+        println!("🤖 [SystemdNetworkdBackend] Entering provisioning mode not yet implemented.");
+        unimplemented!("This backend is a placeholder.")
+    }
+
+    async fn exit_provisioning_mode(&self) -> Result<()> {
+        println!("🤖 [SystemdNetworkdBackend] Exiting provisioning mode not yet implemented.");
+        unimplemented!("This backend is a placeholder.")
+    }
+
     async fn scan(&self) -> Result<Vec<Network>> {
         println!("🤖 [SystemdNetworkdBackend] Scanning not yet implemented.");
         unimplemented!("This backend is a placeholder and does not yet implement scanning.")

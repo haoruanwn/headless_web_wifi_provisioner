@@ -17,6 +17,15 @@ pub enum Error {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("Command failed: {0}")]
+    CommandFailed(String),
+
+    #[error("D-Bus error: {0}")]
+    Dbus(#[from] zbus::Error),
+
+    #[error("zvariant error: {0}")]
+    Zvariant(#[from] zbus::zvariant::Error),
+
     #[error("Web server error: {0}")]
     WebServer(#[from] axum::BoxError),
 

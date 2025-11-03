@@ -17,6 +17,18 @@ pub struct Network {
 /// for scanning and connecting to Wi-Fi networks.
 #[async_trait]
 pub trait ProvisioningBackend: Send + Sync {
+    /// Prepares and enters the provisioning mode.
+    /// This typically involves starting an Access Point (e.g., hostapd),
+    /// configuring an IP address, and starting DHCP/DNS services.
+    /// Wi-Fi切换为AP模式，开始配网
+    async fn enter_provisioning_mode(&self) -> crate::Result<()>;
+
+    /// Exits the provisioning mode and cleans up resources.
+    /// This typically involves stopping the Access Point, cleaning up the IP address,
+    /// and switching the interface to station (STA) mode.
+    /// Wi-Fi退出AP模式，清理资源
+    async fn exit_provisioning_mode(&self) -> crate::Result<()>;
+
     /// Scans for available Wi-Fi networks.
     ///
     /// # Returns

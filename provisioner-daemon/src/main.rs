@@ -30,7 +30,7 @@ async fn main() -> anyhow::Result<()> {
     #[cfg(feature = "backend_wpa_dbus")]
     let backend: Arc<dyn provisioner_core::traits::ProvisioningBackend> = {
         println!("📡 Backend: WPA Supplicant (D-Bus) selected");
-        Arc::new(provisioner_core::backends::wpa_supplicant_dbus::DbusBackend::new())
+        Arc::new(provisioner_core::backends::wpa_supplicant_dbus::DbusBackend::new().await?)
     };
     #[cfg(feature = "backend_systemd")]
     let backend: Arc<dyn provisioner_core::traits::ProvisioningBackend> = {
@@ -53,6 +53,11 @@ async fn main() -> anyhow::Result<()> {
             Arc::new(provisioner_core::frontends::provider_embed::EmbedFrontend::new())
         }
     };
+
+    // --- Setup Provisioning Mode ---
+    println!("Setting up provisioning mode...");
+    backend.enter_provisioning_mode().await?;
+    println!("Provisioning mode setup complete.");
 
     // --- Start the Web Server --- 
     let web_server_handle = web_server::start_web_server(

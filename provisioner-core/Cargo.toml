@@ -16,7 +16,9 @@ async-trait.workspace = true
 leasehund.workspace = true # DHCP
 
 # === 可选依赖 (由 Features 控制) ===
-zbus = { workspace = true, optional = true }          # D-Bus
+zbus = { workspace = true, optional = true }
+zbus_macros = { workspace = true, optional = true }
+futures-util = { version = "0.3", optional = true }
 
 # --- 交付方式依赖 ---
 rust-embed = { workspace = true, optional = true }
@@ -29,7 +31,7 @@ mime_guess = { workspace = true, optional = true }
 default = []
 
 # === 1. 后端实现选择 (隐式决定交付方式) ===
-backend_wpa_dbus = ["dep:zbus", "dep:rust-embed", "dep:mime_guess", "dep:serde_json"] # Real backend -> embed
+backend_wpa_dbus = ["dep:zbus", "dep:zbus_macros", "dep:rust-embed", "dep:mime_guess", "dep:serde_json", "dep:futures-util"] # Real backend -> embed
 backend_systemd = ["dep:rust-embed", "dep:mime_guess", "dep:serde_json"]             # Real backend -> embed
 backend_mock = ["dep:tower-http", "dep:mime_guess", "dep:serde_json"]                # Mock backend -> disk
 

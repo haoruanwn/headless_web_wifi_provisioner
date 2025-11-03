@@ -18,6 +18,16 @@ impl MockBackend {
 
 #[async_trait]
 impl ProvisioningBackend for MockBackend {
+    async fn enter_provisioning_mode(&self) -> Result<()> {
+        println!("🤖 [MockBackend] Entering provisioning mode (simulated).");
+        Ok(())
+    }
+
+    async fn exit_provisioning_mode(&self) -> Result<()> {
+        println!("🤖 [MockBackend] Exiting provisioning mode (simulated).");
+        Ok(())
+    }
+
     async fn scan(&self) -> Result<Vec<Network>> {
         println!("🤖 [MockBackend] Scanning for networks...");
         // Simulate a delay
