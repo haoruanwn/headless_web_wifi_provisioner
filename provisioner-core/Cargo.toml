@@ -6,7 +6,6 @@ edition.workspace = true
 
 [dependencies]
 # 核心依赖 (始终需要)
-# 注意：我们不再需要 "0.7" 这样的版本号了
 tokio = { workspace = true, features = ["full"] }
 axum.workspace = true
 serde = { workspace = true, features = ["derive"] }
@@ -18,8 +17,10 @@ leasehund.workspace = true # DHCP
 
 # === 可选依赖 (由 Features 控制) ===
 zbus = { workspace = true, optional = true }          # D-Bus
+
+# --- 交付方式依赖 ---
 rust-embed = { workspace = true, optional = true }
-tower-http = { workspace = true, optional = true }
+tower-http = { workspace = true, optional = true } # for DiskFrontend
 mime_guess = { workspace = true, optional = true }
 
 
@@ -27,14 +28,11 @@ mime_guess = { workspace = true, optional = true }
 # 默认特性为空
 default = []
 
-# === 1. 后端实现选择 (必须选一个) ===
-backend_dbus = ["dep:zbus"]
-backend_mock = [] 
+# === 1. 后端实现选择 (隐式决定交付方式) ===
+backend_wpa_dbus = ["dep:zbus", "dep:rust-embed", "dep:mime_guess", "dep:serde_json"] # Real backend -> embed
+backend_systemd = ["dep:rust-embed", "dep:mime_guess", "dep:serde_json"]             # Real backend -> embed
+backend_mock = ["dep:tower-http", "dep:mime_guess", "dep:serde_json"]                # Mock backend -> disk
 
-# === 2. 前端实现选择 (必须选一个) ===
-frontend_embed = ["dep:rust-embed", "dep:mime_guess", "dep:serde_json"]
-frontend_disk = ["dep:tower-http", "dep:mime_guess", "dep:serde_json"]
-
-# === 3. "便捷"组合包 (方便构建) ===
-release_build = ["backend_dbus", "frontend_embed"]
-debug_build = ["backend_mock", "frontend_disk"]
+# === 2. UI 主题选择 ===
+ui_bootstrap = []
+ui_simple = []

@@ -1,4 +1,3 @@
-
 use crate::traits::{ProvisioningBackend, UiAssetProvider};
 use axum::{
     extract::{Path, State},
@@ -45,11 +44,12 @@ pub fn start_web_server(
         .route("/{*path}", get(serve_static_asset))
         .with_state(app_state);
 
-    // For debug builds, listen on localhost for easy testing.
-    // For release builds, listen on the captive portal IP.
-    #[cfg(feature = "debug_build")]
+    // The listening address is now determined by the backend choice.
+    // Mock backend implies local development.
+    #[cfg(feature = "backend_mock")]
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
-    #[cfg(not(feature = "debug_build"))]
+    // Real backends imply deployment on the device.
+    #[cfg(not(feature = "backend_mock"))]
     let addr = SocketAddr::from(([192, 168, 4, 1], 80));
 
     println!("🌐 Web server listening on {}", addr);

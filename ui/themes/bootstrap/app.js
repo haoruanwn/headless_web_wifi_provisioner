@@ -59,7 +59,33 @@ document.addEventListener('DOMContentLoaded', () => {
                     const item = document.createElement('button');
                     item.type = 'button';
                     item.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center';
-                    item.textContent = network.ssid;
+                    
+                    // Determine Wi-Fi signal icon
+                    let signalIcon;
+                    if (network.signal > 75) {
+                        signalIcon = 'bi-wifi';
+                    } else if (network.signal > 50) {
+                        signalIcon = 'bi-wifi-2';
+                    } else if (network.signal > 25) {
+                        signalIcon = 'bi-wifi-1';
+                    } else {
+                        signalIcon = 'bi-wifi-off'; // Or some other representation for low signal
+                    }
+
+                    // Determine lock icon
+                    const lockIcon = network.security !== 'Open' ? '<i class="bi bi-lock-fill ms-2"></i>' : '';
+
+                    item.innerHTML = `
+                        <span>
+                            <i class="bi ${signalIcon} me-2"></i>
+                            ${network.ssid}
+                        </span>
+                        <span>
+                            <small class="text-muted me-2">${network.security}</small>
+                            ${lockIcon}
+                        </span>
+                    `;
+
                     item.dataset.ssid = network.ssid;
                     item.addEventListener('click', () => {
                         selectedSsid = network.ssid;

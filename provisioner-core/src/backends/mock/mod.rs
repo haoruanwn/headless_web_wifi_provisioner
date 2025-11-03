@@ -25,10 +25,31 @@ impl ProvisioningBackend for MockBackend {
 
         // Return a fixed list of fake networks
         let networks = vec![
-            Network { ssid: "MyHomeWiFi".to_string() },
-            Network { ssid: "CafeGuest".to_string() },
-            Network { ssid: "Neighbor's Network".to_string() },
-            Network { ssid: "xfinitywifi".to_string() },
+            Network {
+                ssid: "MyHomeWiFi".to_string(),
+                signal: 95,
+                security: "WPA3".to_string(),
+            },
+            Network {
+                ssid: "CafeGuest".to_string(),
+                signal: 78,
+                security: "Open".to_string(),
+            },
+            Network {
+                ssid: "Neighbor's Network".to_string(),
+                signal: 55,
+                security: "WPA2".to_string(),
+            },
+            Network {
+                ssid: "xfinitywifi".to_string(),
+                signal: 88,
+                security: "WPA2".to_string(),
+            },
+            Network {
+                ssid: "HiddenNetwork".to_string(),
+                signal: 42,
+                security: "WPA2".to_string(),
+            },
         ];
         
         println!("🤖 [MockBackend] Found {} networks.", networks.len());

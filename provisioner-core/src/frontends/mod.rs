@@ -1,8 +1,9 @@
+// Conditionally compile the frontend providers based on the backend selection.
+// This ensures that a provider is only compiled if its dependencies are available
+// (e.g., `rust-embed` is only a dependency for real backends).
 
-// Conditionally compile and expose the disk-based frontend.
-#[cfg(feature = "frontend_disk")]
-pub mod disk_frontend;
+#[cfg(feature = "backend_mock")]
+pub mod provider_disk;
 
-// Conditionally compile and expose the embedded frontend.
-#[cfg(feature = "frontend_embed")]
-pub mod embed_frontend;
+#[cfg(not(feature = "backend_mock"))]
+pub mod provider_embed;

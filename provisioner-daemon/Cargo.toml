@@ -20,12 +20,11 @@ provisioner-core = { path = "../provisioner-core", default-features = false }
 # 我们定义自己的特性，然后"转发" (forward) 给 core Crate。
 # 这让我们可以从顶层控制所有编译。
 
-# 生产构建：激活 core 里的 D-Bus 和 Embed 特性
-release_build = [
-    "provisioner-core/release_build"
-]
+# 我们定义自己的特性，然后"转发" (forward) 给 core Crate。
+# 这让我们可以从顶层通过 `provisioner-daemon/<feature>` 来控制所有编译。
+backend_wpa_dbus = ["provisioner-core/backend_wpa_dbus"]
+backend_systemd = ["provisioner-core/backend_systemd"]
+backend_mock = ["provisioner-core/backend_mock"]
 
-# 调试构建：激活 core 里的 Mock 和 Disk 特性
-debug_build = [
-    "provisioner-core/debug_build"
-]
+ui_bootstrap = ["provisioner-core/ui_bootstrap"]
+ui_simple = ["provisioner-core/ui_simple"]

@@ -1,13 +1,15 @@
-
 use async_trait::async_trait;
 use serde::Serialize;
 use std::borrow::Cow;
+
+// 在这里定义共享的 Result 类型，和为所有后端和前端定义的 trait。
 
 /// Represents a single Wi-Fi network found during a scan.
 #[derive(Debug, Clone, Serialize)]
 pub struct Network {
     pub ssid: String,
-    // Note: You might add more fields here later, like signal strength, security type, etc.
+    pub signal: u8, // Signal strength as a percentage (0-100)
+    pub security: String, // e.g., "WPA2", "WEP", "Open"
 }
 
 /// Defines the interface for a Wi-Fi provisioning backend.
@@ -20,6 +22,7 @@ pub trait ProvisioningBackend: Send + Sync {
     /// # Returns
     /// A `Result` containing a vector of `Network` structs on success,
     /// or a `crate::error::Error` on failure.
+    /// 扫描可用的 Wi-Fi 网络。
     async fn scan(&self) -> crate::Result<Vec<Network>>;
 
     /// Attempts to connect to a Wi-Fi network.
@@ -30,6 +33,7 @@ pub trait ProvisioningBackend: Send + Sync {
     ///
     /// # Returns
     /// A `Result` indicating success or failure.
+    /// 尝试连接到 Wi-Fi 网络。
     async fn connect(&self, ssid: &str, password: &str) -> crate::Result<()>;
 }
 
@@ -48,5 +52,6 @@ pub trait UiAssetProvider: Send + Sync {
     /// # Returns
     /// A `Result` containing a tuple of (`Cow<'static, [u8]>`, `String`)
     /// representing the asset's content and its MIME type, or an `Error` if not found.
+    /// 获取单个 UI 资源。
     async fn get_asset(&self, path: &str) -> crate::Result<(Cow<'static, [u8]>, String)>;
 }

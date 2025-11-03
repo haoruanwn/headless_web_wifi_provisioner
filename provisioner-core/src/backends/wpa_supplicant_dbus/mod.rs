@@ -1,9 +1,9 @@
-
 use crate::traits::{ProvisioningBackend, Network};
 use crate::Result;
 use async_trait::async_trait;
 
 /// A backend that communicates with wpa_supplicant via D-Bus.
+/// 通过 D-Bus 与 wpa_supplicant 通信的后端。
 #[derive(Debug)]
 pub struct DbusBackend;
 

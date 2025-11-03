@@ -7,26 +7,25 @@ use std::path::PathBuf;
 use tokio::fs;
 
 /// A UI asset provider that reads files directly from disk.
-/// Ideal for development, as it allows for live reloading of UI assets.
-pub struct DiskFrontend {
-    pub ui_dir: PathBuf,
-}
+pub struct DiskFrontend;
 
 impl DiskFrontend {
-    /// Creates a new `DiskFrontend`.
-    ///
-    /// # Arguments
-    /// * `ui_dir` - The path to the directory containing the UI files (e.g., "ui/").
-    pub fn new(ui_dir: PathBuf) -> Self {
-        Self { ui_dir }
+    pub fn new() -> Self {
+        Self
     }
 }
 
 #[async_trait]
 impl UiAssetProvider for DiskFrontend {
     async fn get_asset(&self, path: &str) -> Result<(Cow<'static, [u8]>, String)> {
+        // Select theme path at compile time based on features
+        #[cfg(feature = "ui_bootstrap")]
+        let theme_path = "ui/themes/bootstrap";
+        #[cfg(feature = "ui_simple")]
+        let theme_path = "ui/themes/simple";
+
         // Sanitize the path to prevent directory traversal attacks
-        let asset_path = self.ui_dir.join(path);
+        let asset_path = PathBuf::from(theme_path).join(path);
 
         // Read the file from disk
         let content = fs::read(asset_path)
