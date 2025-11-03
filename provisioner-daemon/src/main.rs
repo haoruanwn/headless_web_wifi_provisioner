@@ -9,16 +9,21 @@ async fn main() -> anyhow::Result<()> {
     println!("🚀 Starting provisioner-daemon...");
 
     // --- Compile-time validation to ensure exactly one backend is selected ---
-    const BACKEND_COUNT: usize = cfg!(feature = "backend_mock") as usize +
-        cfg!(feature = "backend_wpa_dbus") as usize +
-        cfg!(feature = "backend_systemd") as usize;
-    const _: () = assert!(BACKEND_COUNT == 1, "Please select exactly ONE backend feature.");
+    const BACKEND_COUNT: usize = cfg!(feature = "backend_mock") as usize
+        + cfg!(feature = "backend_wpa_dbus") as usize
+        + cfg!(feature = "backend_systemd") as usize;
+    const _: () = assert!(
+        BACKEND_COUNT == 1,
+        "Please select exactly ONE backend feature."
+    );
 
     // --- Compile-time validation to ensure exactly one UI theme is selected ---
-    const UI_THEME_COUNT: usize = cfg!(feature = "ui_bootstrap") as usize +
-        cfg!(feature = "ui_simple") as usize;
-    const _: () = assert!(UI_THEME_COUNT == 1, "Please select exactly ONE UI theme feature: ui_bootstrap or ui_simple.");
-
+    const UI_THEME_COUNT: usize =
+        cfg!(feature = "ui_bootstrap") as usize + cfg!(feature = "ui_simple") as usize;
+    const _: () = assert!(
+        UI_THEME_COUNT == 1,
+        "Please select exactly ONE UI theme feature: ui_bootstrap or ui_simple."
+    );
 
     // --- Runtime instantiation based on the selected features ---
 
@@ -59,11 +64,8 @@ async fn main() -> anyhow::Result<()> {
     backend.enter_provisioning_mode().await?;
     println!("Provisioning mode setup complete.");
 
-    // --- Start the Web Server --- 
-    let web_server_handle = web_server::start_web_server(
-        backend,
-        frontend,
-    );
+    // --- Start the Web Server ---
+    let web_server_handle = web_server::start_web_server(backend, frontend);
 
     // Run the web server
     web_server_handle.await??;

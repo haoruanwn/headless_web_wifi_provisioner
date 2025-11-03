@@ -27,3 +27,17 @@
 
 
  这个架构更加清晰、健壮，且完全符合您的设想。
+
+
+ ## 用cross编译
+ cross编译
+
+```bash
+# 在 POSIX shell (Fedora, macOS) 中运行
+cross build \
+  --target=armv7-unknown-linux-musleabihf \
+  --release \
+  --features "provisioner-daemon/backend_wpa_dbus,provisioner-daemon/ui_bootstrap" \
+  --config 'target.armv7-unknown-linux-musleabihf.rustflags=["-C", "target-feature=+crt-static"]'
+```
+

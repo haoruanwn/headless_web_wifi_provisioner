@@ -1,6 +1,5 @@
-
-use crate::traits::{ProvisioningBackend, Network};
 use crate::Result;
+use crate::traits::{Network, ProvisioningBackend};
 use async_trait::async_trait;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -61,7 +60,7 @@ impl ProvisioningBackend for MockBackend {
                 security: "WPA2".to_string(),
             },
         ];
-        
+
         println!("🤖 [MockBackend] Found {} networks.", networks.len());
         Ok(networks)
     }
@@ -70,7 +69,11 @@ impl ProvisioningBackend for MockBackend {
         println!(
             "🤖 [MockBackend] Attempting to connect to SSID: '{}' with password: '{}'",
             ssid,
-            if password.is_empty() { "(empty)" } else { "********" }
+            if password.is_empty() {
+                "(empty)"
+            } else {
+                "********"
+            }
         );
         // Simulate a connection delay
         sleep(Duration::from_secs(3)).await;

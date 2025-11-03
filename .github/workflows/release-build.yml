@@ -1,0 +1,100 @@
+name: "🚀 Cross-Platform Release Build"
+
+on:
+  # 核心触发器：当一个 "v" 开头的标签被推送到仓库时
+  # 例如: git tag v1.0.2 && git push --tags
+  push:
+    tags:
+      - "v*.*.*"
+      - "v*.*" # 也支持 v1.0 这种
+      
+  # 辅助触发器：允许在 GitHub 网站上手动运行此流程
+  workflow_dispatch:
+
+jobs:
+  build-and-release:
+    name: "Build & Release Assets"
+    runs-on: ubuntu-latest
+    
+    strategy:
+      matrix:
+        include:
+          - target: armv7-unknown-linux-musleabihf
+            asset_suffix: armv7-musleabihf
+            features: "provisioner-daemon/backend_wpa_dbus,provisioner-daemon/ui_bootstrap"
+            env_rustflags: "-C target-feature=+crt-static"
+
+        #   - target: x86_64-unknown-linux-musl
+        #     asset_suffix: x86_64-musl
+        #     features: "" 
+        #     env_rustflags: "-C target-feature=+crt-static"
+            
+          # - target: aarch64-unknown-linux-musl
+          #   asset_suffix: aarch64-musl
+          #   features: "some-other-features"
+          #   env_rustflags: "-C target-feature=+crt-static"
+
+    steps:
+      - name: "1. Checkout Repository"
+        uses: actions/checkout@v4
+
+      - name: "2. Install Rust Toolchain"
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          # 自动为 'cross' 安装所需的目标
+          targets: ${{ matrix.target }}
+
+      - name: "3. Install 'cross' for cross-compilation"
+        # 从 git main 安装，获取最新的容器镜像支持
+        run: cargo install cross --git https://github.com/cross-rs/cross --branch main
+
+      - name: "4. Set Target-Specific Rustflags (via Env)"
+        if: matrix.env_rustflags
+        run: |
+          # 这是我们之前商定的 "无config.toml文件" 的方案
+          # 将 'armv7-unknown-linux-musleabihf' 转换为 'CARGO_TARGET_ARMV7_UNKNOWN_LINUX_MUSLEABIHF_RUSTFLAGS'
+          TARGET_ENV_VAR=$(echo "CARGO_TARGET_${{ matrix.target }}" | tr '[:lower:]-' '[:upper:]_')"_RUSTFLAGS"
+          echo "Setting $TARGET_ENV_VAR=${{ matrix.env_rustflags }}"
+          echo "$TARGET_ENV_VAR=${{ matrix.env_rustflags }}" >> $GITHUB_ENV
+          
+      - name: "5. Build Static Binary"
+        id: build # 给这个步骤一个id，以便后续引用
+        env:
+          # ------------------------------------------------------------------
+          # 可执行文件名
+          PROGRAM_NAME: "provisioner-daemon"
+          # ------------------------------------------------------------------
+        run: |
+          # 根据 'features' 是否为空，动态构建命令
+          BUILD_COMMAND="cross build --target=${{ matrix.target }} --release"
+          if [ -n "${{ matrix.features }}" ]; then
+            BUILD_COMMAND="$BUILD_COMMAND --features \"${{ matrix.features }}\""
+          fi
+
+          echo "Running: $BUILD_COMMAND"
+          eval $BUILD_COMMAND
+          
+          # --- 准备上传产物 ---
+          # 1. 找到源文件路径
+          SOURCE_PATH="target/${{ matrix.target }}/release/${PROGRAM_NAME}"
+          
+          # 2. 定义清晰的目标文件名 (e.g., your-program-name-armv7-musleabihf)
+          DEST_NAME="${PROGRAM_NAME}-${{ matrix.asset_suffix }}"
+          
+          echo "Moving '$SOURCE_PATH' to '$DEST_NAME'"
+          mv $SOURCE_PATH $DEST_NAME
+          
+          # 3. 将目标文件名输出，供后续步骤使用
+          echo "asset_path=$DEST_NAME" >> $GITHUB_OUTPUT
+
+      - name: "6. Create Release and Upload Asset"
+        uses: softprops/gh-release@v2
+        with:
+          # (重要) 'files' 字段会读取上一步 (id: build) 的输出
+          files: ${{ steps.build.outputs.asset_path }}
+          # 'draft: true' 是一个好习惯，它会创建一个草稿Release
+          # 如果标签对应的Release已存在，它会向其中添加文件
+          draft: false 
+          # 'prerelease: false' 表示这是一个正式版
+          prerelease: false

@@ -59,7 +59,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     const item = document.createElement('button');
                     item.type = 'button';
                     item.className = 'list-group-item list-group-item-action d-flex justify-content-between align-items-center';
-                    
+
                     // Determine Wi-Fi signal icon
                     let signalIcon;
                     if (network.signal > 75) {

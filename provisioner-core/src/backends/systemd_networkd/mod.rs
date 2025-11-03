@@ -2,8 +2,8 @@
 // This demonstrates the extensibility of the backend architecture.
 // 这是一个占位符，表示一个与 systemd-networkd 交互的后端。
 
-use crate::traits::{ProvisioningBackend, Network};
 use crate::Result;
+use crate::traits::{Network, ProvisioningBackend};
 use async_trait::async_trait;
 
 #[derive(Debug)]

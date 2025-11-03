@@ -1,5 +1,5 @@
-use std::net::Ipv4Addr;
 use std::collections::{HashMap, VecDeque};
+use std::net::Ipv4Addr;
 use tokio::net::UdpSocket;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
@@ -26,7 +26,7 @@ async fn run(ap_ip: Ipv4Addr, mut shutdown_rx: oneshot::Receiver<()>) -> anyhow:
     let base = u32::from(ap_ip);
     let pool_ips: VecDeque<Ipv4Addr> = (1..=2).map(|i| Ipv4Addr::from(base + i)).collect();
     let mut free = pool_ips;
-    let mut leases: HashMap<[u8;6], Ipv4Addr> = HashMap::new();
+    let mut leases: HashMap<[u8; 6], Ipv4Addr> = HashMap::new();
 
     // Bind to 0.0.0.0:67 (requires privileges on Linux)
     let sock = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 67)).await?;
@@ -99,26 +99,43 @@ async fn run(ap_ip: Ipv4Addr, mut shutdown_rx: oneshot::Receiver<()>) -> anyhow:
 
 // Helpers: parse DHCP message type from options (option 53). Returns None if not a DHCP packet.
 fn parse_dhcp_msg_type(pkt: &[u8]) -> Option<u8> {
-    if pkt.len() < 240 { return None; }
+    if pkt.len() < 240 {
+        return None;
+    }
     let cookie = &pkt[236..240];
-    if cookie != [0x63,0x82,0x53,0x63] { return None; }
+    if cookie != [0x63, 0x82, 0x53, 0x63] {
+        return None;
+    }
     let mut i = 240;
-    while i+1 <= pkt.len() {
+    while i + 1 <= pkt.len() {
         let opt = pkt[i];
-        if opt == 255 { break; }
-        if opt == 0 { i +=1; continue; }
-        if i+1 >= pkt.len() { break; }
-        let len = pkt[i+1] as usize;
-        if i+2+len > pkt.len() { break; }
-        if opt == 53 && len==1 { return Some(pkt[i+2]); }
+        if opt == 255 {
+            break;
+        }
+        if opt == 0 {
+            i += 1;
+            continue;
+        }
+        if i + 1 >= pkt.len() {
+            break;
+        }
+        let len = pkt[i + 1] as usize;
+        if i + 2 + len > pkt.len() {
+            break;
+        }
+        if opt == 53 && len == 1 {
+            return Some(pkt[i + 2]);
+        }
         i += 2 + len;
     }
     None
 }
 
-fn extract_chaddr(pkt: &[u8]) -> Option<[u8;6]> {
-    if pkt.len() < 34 { return None; }
-    let mut mac = [0u8;6];
+fn extract_chaddr(pkt: &[u8]) -> Option<[u8; 6]> {
+    if pkt.len() < 34 {
+        return None;
+    }
+    let mut mac = [0u8; 6];
     mac.copy_from_slice(&pkt[28..34]);
     Some(mac)
 }
@@ -151,19 +168,29 @@ fn build_reply(request: &[u8], yiaddr: Ipv4Addr, server_ip: Ipv4Addr, msg_type: 
         buf[28..44].copy_from_slice(&request[28..44]);
     }
     // magic cookie
-    buf[236..240].copy_from_slice(&[0x63,0x82,0x53,0x63]);
+    buf[236..240].copy_from_slice(&[0x63, 0x82, 0x53, 0x63]);
 
     // options: msg type, server id, lease time, subnet mask, router, end
     let mut opts = Vec::new();
-    opts.push(53u8); opts.push(1u8); opts.push(msg_type);
+    opts.push(53u8);
+    opts.push(1u8);
+    opts.push(msg_type);
     // server id option 54
-    opts.push(54); opts.push(4); opts.extend_from_slice(&server_ip.octets());
+    opts.push(54);
+    opts.push(4);
+    opts.extend_from_slice(&server_ip.octets());
     // subnet mask option 1 -> 255.255.255.0
-    opts.push(1); opts.push(4); opts.extend_from_slice(&[255,255,255,0]);
+    opts.push(1);
+    opts.push(4);
+    opts.extend_from_slice(&[255, 255, 255, 0]);
     // router option 3
-    opts.push(3); opts.push(4); opts.extend_from_slice(&server_ip.octets());
+    opts.push(3);
+    opts.push(4);
+    opts.extend_from_slice(&server_ip.octets());
     // lease time 51 -> 3600s
-    opts.push(51); opts.push(4); opts.extend_from_slice(&3600u32.to_be_bytes());
+    opts.push(51);
+    opts.push(4);
+    opts.extend_from_slice(&3600u32.to_be_bytes());
     // end
     opts.push(255);
 

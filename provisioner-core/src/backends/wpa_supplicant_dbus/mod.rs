@@ -1,14 +1,14 @@
-use crate::traits::{ProvisioningBackend, Network};
-use crate::{Result, Error};
+use crate::traits::{Network, ProvisioningBackend};
+use crate::{Error, Result};
 use async_trait::async_trait;
+use futures_util::stream::StreamExt;
 use std::collections::HashMap;
+use std::convert::TryInto;
 use std::sync::{Arc, Mutex};
 use tokio::process::Command;
+use zbus::Connection;
+use zbus::zvariant::{ObjectPath, OwnedValue};
 use zbus_macros::proxy;
-use std::convert::TryInto;
-use zbus::{Connection};
-use zbus::zvariant::{OwnedValue, ObjectPath};
-use futures_util::stream::StreamExt;
 // DHCP implementation for provisioning mode
 #[cfg(feature = "backend_wpa_dbus")]
 mod dhcp;
@@ -17,7 +17,6 @@ const IFACE_NAME: &str = "wlan0";
 const AP_IP_ADDR: &str = "192.168.4.1/24";
 const WPA_S_SERVICE: &str = "fi.w1.wpa_supplicant1";
 const WPA_S_PATH: &str = "/fi/w1/wpa_supplicant1";
-
 
 // Using zbus_macros to generate async proxy code for the interfaces we need.
 #[proxy(interface = "org.freedesktop.DBus.Properties")]
@@ -45,14 +44,20 @@ trait WpaInterface {
     fn scan_done(&self, success: bool) -> zbus::Result<()>;
 }
 
-
 /// A backend that communicates with wpa_supplicant via D-Bus.
 #[derive(Debug)]
 pub struct DbusBackend {
     hostapd_pid: Arc<Mutex<Option<u32>>>,
     connection: Connection,
     #[cfg(feature = "backend_wpa_dbus")]
-    dhcp_task: Arc<Mutex<Option<(tokio::sync::oneshot::Sender<()>, tokio::task::JoinHandle<()>)>>>,
+    dhcp_task: Arc<
+        Mutex<
+            Option<(
+                tokio::sync::oneshot::Sender<()>,
+                tokio::task::JoinHandle<()>,
+            )>,
+        >,
+    >,
 }
 
 impl DbusBackend {
@@ -68,24 +73,36 @@ impl DbusBackend {
 
     /// Finds the D-Bus object path for our wireless interface (e.g., wlan0)
     async fn get_iface_proxy(&self) -> Result<WpaInterfaceProxy<'_>> {
-        let supplicant_proxy = WpaSupplicantProxy::new(&self.connection, WPA_S_SERVICE, WPA_S_PATH).await?;
+        let supplicant_proxy =
+            WpaSupplicantProxy::new(&self.connection, WPA_S_SERVICE, WPA_S_PATH).await?;
         let iface_paths = supplicant_proxy.interfaces().await?;
 
         for path in iface_paths {
             // PropertiesProxy expects an object path; try converting string path into ObjectPath
             let obj_path = ObjectPath::try_from(path.as_str())?;
-            let prop_proxy = PropertiesProxy::new(&self.connection, WPA_S_SERVICE, &obj_path).await?;
-            let props = prop_proxy.get_all("fi.w1.wpa_supplicant1.Interface").await?;
+            let prop_proxy =
+                PropertiesProxy::new(&self.connection, WPA_S_SERVICE, &obj_path).await?;
+            let props = prop_proxy
+                .get_all("fi.w1.wpa_supplicant1.Interface")
+                .await?;
             if let Some(val) = props.get("Ifname") {
                 if let Ok(ifname) = <OwnedValue as TryInto<String>>::try_into(val.clone()) {
                     if ifname == IFACE_NAME {
                         // create interface proxy using an owned object path to avoid returning a reference to a local
-                        return Ok(WpaInterfaceProxy::new(&self.connection, WPA_S_SERVICE, obj_path.into_owned()).await?);
+                        return Ok(WpaInterfaceProxy::new(
+                            &self.connection,
+                            WPA_S_SERVICE,
+                            obj_path.into_owned(),
+                        )
+                        .await?);
                     }
                 }
             }
         }
-        Err(Error::CommandFailed(format!("Wi-Fi interface '{}' not found.", IFACE_NAME)))
+        Err(Error::CommandFailed(format!(
+            "Wi-Fi interface '{}' not found.",
+            IFACE_NAME
+        )))
     }
 }
 
@@ -93,17 +110,32 @@ impl DbusBackend {
 impl ProvisioningBackend for DbusBackend {
     async fn enter_provisioning_mode(&self) -> Result<()> {
         println!("📡 [DbusBackend] Entering provisioning mode...");
-        let output = Command::new("ip").arg("addr").arg("add").arg(AP_IP_ADDR).arg("dev").arg(IFACE_NAME).output().await?;
+        let output = Command::new("ip")
+            .arg("addr")
+            .arg("add")
+            .arg(AP_IP_ADDR)
+            .arg("dev")
+            .arg(IFACE_NAME)
+            .output()
+            .await?;
         if !output.status.success() {
             let error_msg = String::from_utf8_lossy(&output.stderr);
-            return Err(Error::CommandFailed(format!("Failed to set IP address: {}", error_msg)));
+            return Err(Error::CommandFailed(format!(
+                "Failed to set IP address: {}",
+                error_msg
+            )));
         }
-        let child = Command::new("hostapd").arg("/etc/hostapd.conf").arg("-B").spawn()?;
+        let child = Command::new("hostapd")
+            .arg("/etc/hostapd.conf")
+            .arg("-B")
+            .spawn()?;
         if let Some(pid) = child.id() {
             println!("📡 [DbusBackend] Started hostapd with PID: {}", pid);
             *self.hostapd_pid.lock().unwrap() = Some(pid);
         } else {
-            return Err(Error::CommandFailed("Could not get PID for hostapd process".to_string()));
+            return Err(Error::CommandFailed(
+                "Could not get PID for hostapd process".to_string(),
+            ));
         }
         // Start DHCP server (edge-dhcp) when provisioning mode is entered.
         #[cfg(feature = "backend_wpa_dbus")]
@@ -115,7 +147,7 @@ impl ProvisioningBackend for DbusBackend {
 
     async fn exit_provisioning_mode(&self) -> Result<()> {
         println!("📡 [DbusBackend] Exiting provisioning mode...");
-        
+
         // Stop DHCP server first if running
         #[cfg(feature = "backend_wpa_dbus")]
         {
@@ -128,12 +160,25 @@ impl ProvisioningBackend for DbusBackend {
             println!("📡 [DbusBackend] Killing hostapd process with PID: {}", pid);
             let output = Command::new("kill").arg(pid.to_string()).output().await?;
             if !output.status.success() {
-                eprintln!("Warning: Failed to kill hostapd process: {}", String::from_utf8_lossy(&output.stderr));
+                eprintln!(
+                    "Warning: Failed to kill hostapd process: {}",
+                    String::from_utf8_lossy(&output.stderr)
+                );
             }
         }
-        let output = Command::new("ip").arg("addr").arg("del").arg(AP_IP_ADDR).arg("dev").arg(IFACE_NAME).output().await?;
+        let output = Command::new("ip")
+            .arg("addr")
+            .arg("del")
+            .arg(AP_IP_ADDR)
+            .arg("dev")
+            .arg(IFACE_NAME)
+            .output()
+            .await?;
         if !output.status.success() {
-            return Err(Error::CommandFailed(format!("Failed to clean up IP address: {}", String::from_utf8_lossy(&output.stderr))));
+            return Err(Error::CommandFailed(format!(
+                "Failed to clean up IP address: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
         }
         println!("📡 [DbusBackend] Provisioning mode exited.");
         Ok(())
@@ -152,7 +197,8 @@ impl ProvisioningBackend for DbusBackend {
 
         for path in bss_paths {
             let obj_path = ObjectPath::try_from(path.as_str())?;
-            let prop_proxy = PropertiesProxy::new(&self.connection, WPA_S_SERVICE, &obj_path).await?;
+            let prop_proxy =
+                PropertiesProxy::new(&self.connection, WPA_S_SERVICE, &obj_path).await?;
             let props = prop_proxy.get_all("fi.w1.wpa_supplicant1.BSS").await?;
 
             if let (Some(ssid_val), Some(signal_val)) = (props.get("SSID"), props.get("Signal")) {
@@ -168,11 +214,17 @@ impl ProvisioningBackend for DbusBackend {
                             "Open".to_string()
                         };
 
-                        if let Ok(signal) = <OwnedValue as TryInto<i16>>::try_into(signal_val.clone()) {
+                        if let Ok(signal) =
+                            <OwnedValue as TryInto<i16>>::try_into(signal_val.clone())
+                        {
                             // Convert signal from dBm to a rough 0-100 percentage.
                             let signal_percent = ((signal.clamp(-100i16, -50i16) + 100) * 2) as u8;
 
-                            networks.push(Network { ssid, signal: signal_percent, security });
+                            networks.push(Network {
+                                ssid,
+                                signal: signal_percent,
+                                security,
+                            });
                         }
                     }
                 }
@@ -182,7 +234,10 @@ impl ProvisioningBackend for DbusBackend {
     }
 
     async fn connect(&self, ssid: &str, password: &str) -> Result<()> {
-        println!("📡 [DbusBackend] Attempting to connect to SSID: '{}' via D-Bus...", ssid);
+        println!(
+            "📡 [DbusBackend] Attempting to connect to SSID: '{}' via D-Bus...",
+            ssid
+        );
         let iface_proxy = self.get_iface_proxy().await?;
 
         let mut args = HashMap::new();
@@ -196,10 +251,13 @@ impl ProvisioningBackend for DbusBackend {
             args.insert("psk".to_string(), psk_owned);
         }
 
-    let net_path = iface_proxy.add_network(args).await?;
-    iface_proxy.select_network(&net_path).await?;
+        let net_path = iface_proxy.add_network(args).await?;
+        iface_proxy.select_network(&net_path).await?;
 
-        println!("📡 [DbusBackend] Connection process initiated for '{}'", ssid);
+        println!(
+            "📡 [DbusBackend] Connection process initiated for '{}'",
+            ssid
+        );
         Ok(())
     }
 }
@@ -210,7 +268,9 @@ impl DbusBackend {
     async fn start_dhcp_server(&self) -> Result<()> {
         // In-process minimal DHCP responder
         let ip_str = AP_IP_ADDR.split('/').next().unwrap_or(AP_IP_ADDR);
-        let ap_ip: std::net::Ipv4Addr = ip_str.parse().map_err(|e| Error::CommandFailed(format!("Invalid AP IP: {}", e)))?;
+        let ap_ip: std::net::Ipv4Addr = ip_str
+            .parse()
+            .map_err(|e| Error::CommandFailed(format!("Invalid AP IP: {}", e)))?;
 
         let (shutdown_tx, handle) = crate::backends::wpa_supplicant_dbus::dhcp::spawn_server(ap_ip);
         *self.dhcp_task.lock().unwrap() = Some((shutdown_tx, handle));
@@ -228,4 +288,3 @@ impl DbusBackend {
         Ok(())
     }
 }
-
