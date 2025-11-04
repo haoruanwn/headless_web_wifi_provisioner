@@ -32,7 +32,7 @@
 cross build \
   --target=armv7-unknown-linux-musleabihf \
   --release \
-  --features "provisioner-daemon/backend_wpa_dbus,provisioner-daemon/ui_bootstrap" \
+  --features "provisioner-daemon/backend_wpa_cli_exclusive,provisioner-daemon/ui_echo_mate" \
   --config 'target.armv7-unknown-linux-musleabihf.rustflags=["-C", "target-feature=+crt-static"]'
 ```
 

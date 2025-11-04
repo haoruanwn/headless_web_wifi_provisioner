@@ -66,37 +66,6 @@ impl WpaCliExclusiveBackend {
     }
 }
 
-// Helper: run a command and return Output; produce a unified Error::CommandFailed on failure
-async fn run_cmd_output(mut cmd: Command, ctx: &str) -> Result<Output> {
-    match cmd.output().await {
-        Ok(out) => {
-            if !out.status.success() {
-                let err = String::from_utf8_lossy(&out.stderr);
-                error!(context = %ctx, stderr = %err, "command failed");
-                return Err(Error::CommandFailed(format!("{} failed: {}", ctx, err)));
-            }
-            Ok(out)
-        }
-        Err(e) => {
-            error!(context = %ctx, error = %e, "failed to spawn command");
-            Err(Error::CommandFailed(format!("{} spawn failed: {}", ctx, e)))
-        }
-    }
-}
-
-// Helper: run a command expecting a status success, no output returned
-async fn run_cmd_status(mut cmd: Command, ctx: &str) -> Result<()> {
-    match cmd.status().await {
-        Ok(status) => {
-            if !status.success() {
-                return Err(Error::CommandFailed(format!("{} returned non-zero", ctx)));
-            }
-            Ok(())
-        }
-        Err(e) => Err(Error::CommandFailed(format!("{} spawn failed: {}", ctx, e))),
-    }
-}
-
 #[async_trait]
 impl ProvisioningBackend for WpaCliExclusiveBackend {
 
