@@ -47,14 +47,13 @@ impl ProvisioningBackend for WpaCliDnsmasqBackend {
             }
         }
 
-        // 2. Start hostapd
+        // 2. Start hostapd (without -B)
         let hostapd_child = Command::new("hostapd")
             .arg("/etc/hostapd.conf")
-            .arg("-B")
             .spawn()?;
         *self.hostapd.lock().unwrap() = Some(hostapd_child);
 
-        // 3. Start dnsmasq
+        // 3. Start dnsmasq (with --no-daemon)
         let ap_ip_only = AP_IP_ADDR.split('/').next().unwrap_or("");
         let dnsmasq_child = Command::new("dnsmasq")
             .arg(format!("--interface={}", IFACE_NAME))
@@ -62,6 +61,7 @@ impl ProvisioningBackend for WpaCliDnsmasqBackend {
             .arg(format!("--address=/#/{}", ap_ip_only))
             .arg("--no-resolv")
             .arg("--no-hosts")
+            .arg("--no-daemon")
             .spawn()?;
         *self.dnsmasq.lock().unwrap() = Some(dnsmasq_child);
 
@@ -219,25 +219,52 @@ impl ProvisioningBackend for WpaCliDnsmasqBackend {
             .status()
             .await?;
 
-        Command::new("wpa_cli")
-            .arg("-i")
-            .arg(IFACE_NAME)
-            .arg("save_config")
-            .status()
-            .await?;
-
-        Command::new("wpa_cli")
-            .arg("-i")
-            .arg(IFACE_NAME)
-            .arg("reconfigure")
-            .status()
-            .await?;
-
-        println!(
-            "📡 [WpaCliDnsmasqBackend] Connection process initiated for '{}'",
-            ssid
-        );
-        Ok(())
+        // Polling for connection status
+        println!("藤 [WpaCliDnsmasqBackend] Waiting for connection result...");
+        for _ in 0..30 { // Max wait 30 seconds
+            let status_output = Command::new("wpa_cli")
+                .arg("-i")
+                .arg(IFACE_NAME)
+                .arg("status")
+                .output()
+                .await?;
+            
+            if !status_output.status.success() {
+                return Err(Error::CommandFailed("Failed to get wpa_cli status".into()));
+            }
+    
+            let status_str = String::from_utf8_lossy(&status_output.stdout);
+            
+            if status_str.contains("wpa_state=COMPLETED") {
+                println!("藤 [WpaCliDnsmasqBackend] Connection successful (COMPLETED).");
+                
+                // Save config on success
+                Command::new("wpa_cli")
+                    .arg("-i")
+                    .arg(IFACE_NAME)
+                    .arg("save_config")
+                    .status()
+                    .await?;
+                    
+                return Ok(());
+            }
+            
+            if status_str.contains("reason=WRONG_KEY") {
+                 println!("藤 [WpaCliDnsmasqBackend] Connection failed: WRONG_KEY");
+                 Command::new("wpa_cli")
+                    .arg("-i")
+                    .arg(IFACE_NAME)
+                    .arg("remove_network")
+                    .arg(network_id.to_string())
+                    .status().await?;
+                 return Err(Error::CommandFailed("Invalid password".into()));
+            }
+    
+            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        }
+    
+        println!("藤 [WpaCliDnsmasqBackend] Connection attempt timed out.");
+        Err(Error::CommandFailed("Connection timed out".into()))
     }
 }
 
