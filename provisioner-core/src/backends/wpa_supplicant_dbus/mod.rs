@@ -97,8 +97,25 @@ impl DbusBackend {
 impl ProvisioningBackend for DbusBackend {
     async fn enter_provisioning_mode(&self) -> Result<()> {
         println!("📡 [DbusBackend] Entering provisioning mode...");
+
+        // 1. Tell wpa_supplicant to release the interface
+        println!("📡 [DbusBackend] Disconnecting wpa_supplicant from {}...", IFACE_NAME);
+        let output = Command::new("wpa_cli")
+            .arg("-i")
+            .arg(IFACE_NAME)
+            .arg("disconnect")
+            .output()
+            .await?;
+        if !output.status.success() {
+             let error_msg = String::from_utf8_lossy(&output.stderr);
+             if !error_msg.contains("Failed to connect") && !error_msg.contains("Could not disconnect") {
+                tracing::warn!("wpa_cli disconnect failed (this might be okay): {}", error_msg);
+             }
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
         
-        // 1. Set IP
+        // 2. Set IP
+        println!("📡 [DbusBackend] Setting IP address...");
         let output = Command::new("ip")
             .arg("addr")
             .arg("add")
@@ -119,6 +136,8 @@ impl ProvisioningBackend for DbusBackend {
             }
         }
 
+        // 3. Start hostapd
+        println!("📡 [DbusBackend] Starting hostapd...");
         let child = Command::new("hostapd")
             .arg("/etc/hostapd.conf")
             .arg("-B")
@@ -132,7 +151,7 @@ impl ProvisioningBackend for DbusBackend {
             ));
         }
         
-        // Start dnsmasq process
+        // 4. Start dnsmasq
         println!("📡 [DbusBackend] Starting dnsmasq...");
         let ap_ip_only = AP_IP_ADDR.split('/').next().unwrap_or("");
         let dnsmasq_child = Command::new("dnsmasq")
@@ -152,7 +171,7 @@ impl ProvisioningBackend for DbusBackend {
     async fn exit_provisioning_mode(&self) -> Result<()> {
         println!("📡 [DbusBackend] Exiting provisioning mode...");
 
-        // Stop dnsmasq process
+        // 1. Stop dnsmasq
         println!("📡 [DbusBackend] Stopping dnsmasq...");
         let dnsmasq_child_to_kill = self.dnsmasq.lock().unwrap().take();
         if let Some(mut child) = dnsmasq_child_to_kill {
@@ -161,8 +180,8 @@ impl ProvisioningBackend for DbusBackend {
             }
         }
 
+        // 2. Stop hostapd
         let pid_to_kill = { *self.hostapd_pid.lock().unwrap() };
-
         if let Some(pid) = pid_to_kill {
             println!("📡 [DbusBackend] Killing hostapd process with PID: {}", pid);
             let output = Command::new("kill").arg(pid.to_string()).output().await?;
@@ -174,7 +193,7 @@ impl ProvisioningBackend for DbusBackend {
             }
         }
         
-        // Clean up IP
+        // 3. Clean up IP
         let output = Command::new("ip")
             .arg("addr")
             .arg("del")
@@ -192,6 +211,24 @@ impl ProvisioningBackend for DbusBackend {
                 )));
             }
         }
+
+        // 4. Tell wpa_supplicant to reclaim the interface
+        println!("📡 [DbusBackend] Triggering wpa_supplicant reconfigure...");
+        let output = Command::new("wpa_cli")
+            .arg("-i")
+            .arg(IFACE_NAME)
+            .arg("reconfigure")
+            .output()
+            .await?;
+        if !output.status.success() {
+             let error_msg = String::from_utf8_lossy(&output.stderr);
+             tracing::error!("wpa_cli reconfigure failed: {}", error_msg);
+             return Err(Error::CommandFailed(format!(
+                "Failed to reconfigure wpa_supplicant: {}",
+                error_msg
+            )));
+        }
+        
         println!("📡 [DbusBackend] Provisioning mode exited.");
         Ok(())
     }
@@ -308,3 +345,4 @@ fn parse_scan_results(output: &str) -> Result<Vec<Network>> {
     }
     Ok(networks)
 }
+
