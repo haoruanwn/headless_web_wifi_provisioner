@@ -12,6 +12,7 @@ async fn main() -> anyhow::Result<()> {
     const BACKEND_COUNT: usize = cfg!(feature = "backend_mock") as usize
         + cfg!(feature = "backend_wpa_dbus") as usize
         + cfg!(feature = "backend_wpa_cli") as usize
+        + cfg!(feature = "backend_wpa_cli_exclusive") as usize
         + cfg!(feature = "backend_systemd") as usize;
     const _: () = assert!(
         BACKEND_COUNT == 1,
@@ -48,6 +49,11 @@ async fn main() -> anyhow::Result<()> {
         Arc::new(provisioner_core::backends::wpa_cli_dnsmasq::WpaCliDnsmasqBackend::new()?)
     };
 
+    #[cfg(feature = "backend_wpa_cli_exclusive")]
+    let backend: Arc<dyn provisioner_core::traits::ProvisioningBackend> = {
+        println!("CLI Backend: WPA CLI Exclusive selected");
+        Arc::new(provisioner_core::backends::wpa_cli_exclusive::WpaCliExclusiveBackend::new()?)
+    };
     // Frontend provider is now chosen IMPLICITLY based on the backend selection.
     let frontend: Arc<dyn provisioner_core::traits::UiAssetProvider> = {
         // If mock backend is used, it implies local development. Use the Disk provider.

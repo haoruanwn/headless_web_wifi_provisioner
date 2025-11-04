@@ -26,5 +26,6 @@ backend_wpa_dbus = ["provisioner-core/backend_wpa_dbus"]
 backend_systemd = ["provisioner-core/backend_systemd"]
 backend_mock = ["provisioner-core/backend_mock"]
 backend_wpa_cli = ["provisioner-core/backend_wpa_cli"]
+backend_wpa_cli_exclusive = ["provisioner-core/backend_wpa_cli_exclusive"]
 
 ui_echo_mate = ["provisioner-core/ui_echo_mate"]

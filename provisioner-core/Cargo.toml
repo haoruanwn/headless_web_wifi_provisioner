@@ -38,6 +38,7 @@ default = []
 backend_wpa_dbus = ["zbus", "zbus_macros", "futures-util", "libc"] # Real backend -> embed
 backend_systemd = []             # Real backend -> embed (uses always-present deps)
 backend_wpa_cli = []               # Real backend -> embed (uses wpa_cli and dnsmasq)
+backend_wpa_cli_exclusive = []   # Real backend -> embed (uses wpa_cli, hostapd and dnsmasq)
 backend_mock = ["dep:tower-http"]                # Mock backend -> disk
 
 # === 2. UI 主题选择 ===

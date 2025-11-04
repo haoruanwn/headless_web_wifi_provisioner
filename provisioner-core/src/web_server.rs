@@ -143,19 +143,14 @@ async fn api_connect_wifi(
         .await
     {
         Ok(_) => {
-            tracing::info!("Wi-Fi connection successful, exiting provisioning mode.");
-            // On successful connection, tear down the AP
-            if let Err(e) = state.backend.exit_provisioning_mode().await {
-                tracing::error!("Error exiting provisioning mode: {}", e);
-                // Fall through to return success to the user anyway, as Wi-Fi is connected.
-            }
+            tracing::info!("Wi-Fi connection successful.");
+
             (
                 StatusCode::OK,
                 Json(serde_json::json!({ "status": "success" })),
             )
                 .into_response()
-        }
-        Err(e) => {
+        }        Err(e) => {
             tracing::warn!("Connection failed: {}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,

@@ -14,6 +14,8 @@
 
    ```bash
    cargo run --features "provisioner-daemon/backend_systemd, provisioner-daemon/ui_echo_mate"
+   
+   cargo run --features "provisioner-daemon/backend_wpa_cli_exclusive, provisioner-daemon/ui_echo_mate"
    ```
 
 3. 交叉编译（使用于buildroot的wpa_cli后端+ echo-mate 主题）

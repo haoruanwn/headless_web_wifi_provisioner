@@ -34,6 +34,9 @@ pub enum Error {
     #[error("Asset not found: {0}")]
     AssetNotFound(String),
 
+    #[error("UTF-8 conversion error: {0}")]
+    Utf8(#[from] std::string::FromUtf8Error),
+
     // Add other specific error types here as needed.
     // For example, when we add the D-Bus backend:
     //

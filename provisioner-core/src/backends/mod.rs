@@ -8,4 +8,11 @@ pub mod mock;
 pub mod systemd_networkd;
 
 #[cfg(feature = "backend_wpa_cli")]
+
 pub mod wpa_cli_dnsmasq;
+
+
+
+#[cfg(feature = "backend_wpa_cli_exclusive")]
+
+pub mod wpa_cli_exclusive;
