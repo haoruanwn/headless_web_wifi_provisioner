@@ -216,17 +216,40 @@
 
             const showScannerStatus = (message) => {
                 wifiList.innerHTML = '';
+                // 确保 scannerStatus 元素存在于 DOM 中
+                if (!scannerStatus.parentElement) {
+                    wifiList.appendChild(scannerStatus);
+                }
                 scannerStatus.querySelector('p').textContent = message;
-                wifiList.appendChild(scannerStatus);
             };
 
+            // --- 修改后的 fetchWifiNetworks （简单重试策略） ---
             const fetchWifiNetworks = async () => {
-                showScannerStatus('正在扫描...');
+                showScannerStatus('正在扫描 (AP将短暂重启)...');
                 refreshBtn.disabled = true;
 
+                let response;
                 try {
-                    const response = await fetch('/api/scan');
-                    if (!response.ok) throw new Error('扫描失败');
+                    response = await fetch('/api/scan');
+                } catch (error) {
+                    // 这是预期的 "Failed to fetch"
+                    if (error.message && error.message.includes('Failed to fetch')) {
+                        console.warn('Fetch failed (expected). Retrying after AP restart...');
+                        showScannerStatus('AP重启中，7秒后自动刷新...');
+                        setTimeout(fetchWifiNetworks, 7000);
+                        return;
+                    } else {
+                        // 非预期错误，展示并退出
+                        showScannerStatus(`扫描出错: ${error.message}`);
+                        refreshBtn.disabled = false;
+                        return;
+                    }
+                }
+
+                try {
+                    if (!response.ok) {
+                        throw new Error(`扫描失败 (状态码: ${response.status})`);
+                    }
                     const networks = await response.json();
 
                     wifiList.innerHTML = '';
