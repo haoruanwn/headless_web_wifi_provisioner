@@ -44,5 +44,4 @@ backend_wpa_cli = []               # Real backend -> embed (uses wpa_cli and dns
 backend_mock = ["dep:tower-http"]                # Mock backend -> disk
 
 # === 2. UI 主题选择 ===
-ui_bootstrap = []
-ui_simple = []
+ui_echo_mate = []

@@ -74,21 +74,40 @@ async fn serve_static_asset(
     State(state): WebServerState,
     Path(path): Path<String>,
 ) -> impl IntoResponse {
-    // 添加日志
     tracing::trace!(asset_path = %path, "Attempting to serve static asset");
+
+    // 1. First, try to get the requested asset (e.g., /style.css, /app.js)
     match state.frontend.get_asset(&path).await {
-        Ok((data, mime)) => Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", mime)
-            .body(Body::from(data)) // Explicitly convert to `axum::body::Body`
-            .unwrap(),
-        Err(e) => {
-            // 【添加】当文件未找到时，打印一条警告日志
-            tracing::warn!(asset_path = %path, "Asset not found: {}", e);
+        Ok((data, mime)) => {
+            // Found it, return it directly
             Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body(Body::from(format!("Asset not found: {}", path)))
+                .status(StatusCode::OK)
+                .header("Content-Type", mime)
+                .body(Body::from(data))
                 .unwrap()
+        }
+        Err(_) => {
+            // 2. Asset not found (e.g., /generate_204), fall back to serving index.html
+            tracing::debug!(asset_path = %path, "Asset not found, serving index.html as fallback");
+            
+            match state.frontend.get_asset("index.html").await {
+                Ok((data, mime)) => {
+                    // Successfully returned index.html, captive portal check will pass
+                    Response::builder()
+                        .status(StatusCode::OK)
+                        .header("Content-Type", mime)
+                        .body(Body::from(data))
+                        .unwrap()
+                }
+                Err(e_index) => {
+                    // Fatal error: could not even find index.html
+                    tracing::error!(asset_path = "index.html", "FATAL: index.html not found: {}", e_index);
+                    Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(Body::from("FATAL: index.html not found"))
+                        .unwrap()
+                }
+            }
         }
     }
 }

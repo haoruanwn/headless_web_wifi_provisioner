@@ -5,16 +5,9 @@ use async_trait::async_trait;
 use rust_embed::RustEmbed;
 use std::borrow::Cow;
 
-// Conditionally compile the Asset struct based on the selected UI theme feature.
-// This is the standard way to handle multiple embed sources with rust-embed.
-#[cfg(feature = "ui_bootstrap")]
+#[cfg(feature = "ui_echo_mate")]
 #[derive(RustEmbed)]
-#[folder = "../ui/themes/bootstrap/"]
-struct Asset;
-
-#[cfg(feature = "ui_simple")]
-#[derive(RustEmbed)]
-#[folder = "../ui/themes/simple/"]
+#[folder = "../ui/themes/echo-mate/"]
 struct Asset;
 
 /// A UI asset provider that serves files embedded into the binary.

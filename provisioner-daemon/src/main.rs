@@ -19,11 +19,10 @@ async fn main() -> anyhow::Result<()> {
     );
 
     // --- Compile-time validation to ensure exactly one UI theme is selected ---
-    const UI_THEME_COUNT: usize =
-        cfg!(feature = "ui_bootstrap") as usize + cfg!(feature = "ui_simple") as usize;
+    const UI_THEME_COUNT: usize = cfg!(feature = "ui_echo_mate") as usize;
     const _: () = assert!(
         UI_THEME_COUNT == 1,
-        "Please select exactly ONE UI theme feature: ui_bootstrap or ui_simple."
+        "Please select exactly ONE UI theme feature: ui_echo_mate."
     );
 
     // --- Runtime instantiation based on the selected features ---

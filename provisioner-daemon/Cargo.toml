@@ -27,5 +27,4 @@ backend_systemd = ["provisioner-core/backend_systemd"]
 backend_mock = ["provisioner-core/backend_mock"]
 backend_wpa_cli = ["provisioner-core/backend_wpa_cli"]
 
-ui_bootstrap = ["provisioner-core/ui_bootstrap"]
-ui_simple = ["provisioner-core/ui_simple"]
+ui_echo_mate = ["provisioner-core/ui_echo_mate"]
