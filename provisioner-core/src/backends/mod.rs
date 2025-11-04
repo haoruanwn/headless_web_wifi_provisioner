@@ -18,5 +18,5 @@ pub mod wpa_cli_dnsmasq;
 pub mod wpa_cli_exclusive;
 
 
-#[cfg(feature = "backend_wpa_cli_exclusive2")]
-pub mod wpa_cli_exclusive2;
+#[cfg(feature = "backend_wpa_cli_TDM")]
+pub mod wpa_cli_TDM;

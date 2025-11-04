@@ -13,7 +13,7 @@ async fn main() -> anyhow::Result<()> {
         + cfg!(feature = "backend_wpa_dbus") as usize
         + cfg!(feature = "backend_wpa_cli") as usize
         + cfg!(feature = "backend_wpa_cli_exclusive") as usize
-        + cfg!(feature = "backend_wpa_cli_exclusive2") as usize
+        + cfg!(feature = "backend_wpa_cli_TDM") as usize
         + cfg!(feature = "backend_systemd") as usize;
     const _: () = assert!(
         BACKEND_COUNT == 1,
@@ -55,10 +55,10 @@ async fn main() -> anyhow::Result<()> {
         println!("CLI Backend: WPA CLI Exclusive selected");
         Arc::new(provisioner_core::backends::wpa_cli_exclusive::WpaCliExclusiveBackend::new()?)
     };
-    #[cfg(feature = "backend_wpa_cli_exclusive2")]
+    #[cfg(feature = "backend_wpa_cli_TDM")]
     let backend: Arc<dyn provisioner_core::traits::ProvisioningBackend> = {
-        println!("CLI Backend: WPA CLI Exclusive2 selected");
-        Arc::new(provisioner_core::backends::wpa_cli_exclusive2::WpaCliExclusive2Backend::new()?)
+        println!("CLI Backend: WPA CLI TDM selected");
+        Arc::new(provisioner_core::backends::wpa_cli_TDM::WpaCliTdmBackend::new()?)
     };
     // Frontend provider is now chosen IMPLICITLY based on the backend selection.
     let frontend: Arc<dyn provisioner_core::traits::UiAssetProvider> = {

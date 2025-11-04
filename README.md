@@ -15,7 +15,7 @@
    ```bash
    cargo run --features "provisioner-daemon/backend_systemd, provisioner-daemon/ui_echo_mate"
    
-   cargo build --features "provisioner-daemon/backend_wpa_cli_exclusive, provisioner-daemon/ui_echo_mate"
+   cargo build --features "provisioner-daemon/backend_wpa_cli_TDM, provisioner-daemon/ui_echo_mate"
    ```
 
 3. 交叉编译（使用于buildroot的wpa_cli后端+ echo-mate 主题）
@@ -32,7 +32,7 @@
 cross build \
   --target=armv7-unknown-linux-musleabihf \
   --release \
-  --features "provisioner-daemon/backend_wpa_cli_exclusive,provisioner-daemon/ui_echo_mate" \
+   --features "provisioner-daemon/backend_wpa_cli_TDM,provisioner-daemon/ui_echo_mate" \
   --config 'target.armv7-unknown-linux-musleabihf.rustflags=["-C", "target-feature=+crt-static"]'
 ```
 

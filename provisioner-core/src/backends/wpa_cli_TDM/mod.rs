@@ -1,5 +1,5 @@
-// DEPRECATED: 此实现已迁移到 `wpa_cli_TDM`（时分复用实现）。
-// 旧文件保留以便历史参考，但不建议继续使用。
+// 后端：wpa_cli_TDM（时分复用调用 wpa_cli）
+// 基于之前的 wpa_cli_exclusive2 实现做了重命名并修复了 dnsmasq --address 参数。
 
 use crate::traits::{Network, ProvisioningBackend};
 use crate::{Error, Result};
@@ -12,14 +12,14 @@ const IFACE_NAME: &str = "wlan0";
 const AP_IP_ADDR: &str = "192.168.4.1/24";
 
 #[derive(Debug)]
-pub struct WpaCliExclusive2Backend {
+pub struct WpaCliTdmBackend {
     hostapd: Arc<Mutex<Option<Child>>> ,
     dnsmasq: Arc<Mutex<Option<Child>>> ,
     /// 上一次扫描结果（应用启动时会先执行一次扫描并保存）
     last_scan: Arc<Mutex<Option<Vec<Network>>>>,
 }
 
-impl WpaCliExclusive2Backend {
+impl WpaCliTdmBackend {
     pub fn new() -> Result<Self> {
         Ok(Self {
             hostapd: Arc::new(Mutex::new(None)),
@@ -66,15 +66,14 @@ impl WpaCliExclusive2Backend {
 
     /// 启动 AP（仅启动 hostapd/dnsmasq 并设置 IP），不做扫描
     async fn start_ap(&self) -> Result<()> {
-    // 在启动 AP 之前，清理可能残留的进程（hostapd/dnsmasq/wpa_supplicant）
-    // 这样用户就不需要手动运行 `killall -9 hostapd dnsmasq wpa_supplicant`
-    let _ = Command::new("killall")
-        .arg("-9")
-        .arg("hostapd")
-        .arg("dnsmasq")
-        .arg("wpa_supplicant")
-        .status()
-        .await;
+        // 在启动 AP 之前，清理可能残留的进程（hostapd/dnsmasq/wpa_supplicant）
+        let _ = Command::new("killall")
+            .arg("-9")
+            .arg("hostapd")
+            .arg("dnsmasq")
+            .arg("wpa_supplicant")
+            .status()
+            .await;
 
         // 设置 IP
         let output = Command::new("ip")
@@ -107,7 +106,7 @@ impl WpaCliExclusive2Backend {
         let dnsmasq_child = Command::new("dnsmasq")
             .arg(format!("--interface={}", IFACE_NAME))
             .arg("--dhcp-range=192.168.4.100,192.168.4.200,12h")
-            .arg(format!("--address=/#/{}/", ap_ip_only))
+            .arg(format!("--address=/#/{}", ap_ip_only))
             .arg("--no-resolv")
             .arg("--no-hosts")
             .arg("--no-daemon")
@@ -198,9 +197,9 @@ impl WpaCliExclusive2Backend {
 
         let stdout = String::from_utf8_lossy(&output.stdout);
         // debug 输出
-        println!("📡 [WpaCliExclusive2] --- SCAN RESULTS ---");
+        println!("📡 [WpaCliTDM] --- SCAN RESULTS ---");
         println!("{}", stdout);
-        println!("📡 [WpaCliExclusive2] --------------------");
+        println!("📡 [WpaCliTDM] --------------------");
 
         let networks = Self::parse_scan_results(&stdout)?;
         Ok(networks)
@@ -208,13 +207,13 @@ impl WpaCliExclusive2Backend {
 }
 
 #[async_trait]
-impl ProvisioningBackend for WpaCliExclusive2Backend {
+impl ProvisioningBackend for WpaCliTdmBackend {
     /// 应用启动时会调用此方法（主程序会调用一次）。
     /// 我们的策略：先确保处于 STA 并扫描一次。
     /// - 如果扫描为空 -> 返回错误，停止后续操作。
     /// - 如果扫描有结果 -> 保存结果并启动 AP（展示结果）。
     async fn enter_provisioning_mode(&self) -> Result<()> {
-        println!("📡 [WpaCliExclusive2] Initializing: entering STA to scan...");
+        println!("📡 [WpaCliTDM] Initializing: entering STA to scan...");
 
         // 确保 wpa_supplicant 运行
         let _ = Command::new("wpa_supplicant")
@@ -229,7 +228,7 @@ impl ProvisioningBackend for WpaCliExclusive2Backend {
         let networks = self.scan_internal().await?;
 
         if networks.is_empty() {
-            println!("📡 [WpaCliExclusive2] Initial scan returned no networks. Aborting startup.");
+            println!("📡 [WpaCliTDM] Initial scan returned no networks. Aborting startup.");
             return Err(Error::CommandFailed("Initial scan returned no networks".into()));
         }
 
@@ -237,14 +236,14 @@ impl ProvisioningBackend for WpaCliExclusive2Backend {
         *self.last_scan.lock().await = Some(networks);
 
         // 切换为 AP，展示结果
-        println!("📡 [WpaCliExclusive2] Initial scan found networks, starting AP to serve UI...");
+        println!("📡 [WpaCliTDM] Initial scan found networks, starting AP to serve UI...");
         self.start_ap().await?;
 
         Ok(())
     }
 
     async fn exit_provisioning_mode(&self) -> Result<()> {
-        println!("📡 [WpaCliExclusive2] Exiting provisioning mode (stop AP)");
+        println!("📡 [WpaCliTDM] Exiting provisioning mode (stop AP)");
         self.stop_ap().await?;
         Ok(())
     }
@@ -261,7 +260,7 @@ impl ProvisioningBackend for WpaCliExclusive2Backend {
 
     /// 连接逻辑：切换到 STA 尝试连接；失败后重新扫描并恢复 AP，并返回错误信息（会在 Web 界面展示）
     async fn connect(&self, ssid: &str, password: &str) -> Result<()> {
-        println!("📡 [WpaCliExclusive2] Attempting connect: switching to STA...");
+        println!("📡 [WpaCliTDM] Attempting connect: switching to STA...");
 
         // 停止 AP 并确保 wpa_supplicant 运行
         self.stop_ap().await?;
@@ -331,7 +330,7 @@ impl ProvisioningBackend for WpaCliExclusive2Backend {
             .await?;
 
         // 检查连接状态
-        println!("📡 [WpaCliExclusive2] Waiting for connection result...");
+        println!("📡 [WpaCliTDM] Waiting for connection result...");
         for _ in 0..30 {
             let status_output = Command::new("wpa_cli")
                 .arg("-i")
@@ -345,7 +344,7 @@ impl ProvisioningBackend for WpaCliExclusive2Backend {
             }
             let status_str = String::from_utf8_lossy(&status_output.stdout);
             if status_str.contains("wpa_state=COMPLETED") {
-                println!("📡 [WpaCliExclusive2] Connection successful (COMPLETED). Saving config...");
+                println!("📡 [WpaCliTDM] Connection successful (COMPLETED). Saving config...");
                 Command::new("wpa_cli")
                     .arg("-i")
                     .arg(IFACE_NAME)
@@ -353,17 +352,15 @@ impl ProvisioningBackend for WpaCliExclusive2Backend {
                     .status()
                     .await?;
                 // 成功后自动获取 DHCP（在后台运行 udhcpc），避免手动运行 `udhcpc -i wlan0`
-                // 我们使用 spawn 不 await，以免阻塞请求处理；udhcpc 会在后台完成租约获取。
                 let _ = Command::new("udhcpc")
                     .arg("-i")
                     .arg(IFACE_NAME)
                     .spawn();
-                // 等待短暂时间，给 udhcpc 一点时间来争取到地址（主要用于提高 UX）
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                 return Ok(());
             }
             if status_str.contains("reason=WRONG_KEY") {
-                println!("📡 [WpaCliExclusive2] Connection failed: WRONG_KEY");
+                println!("📡 [WpaCliTDM] Connection failed: WRONG_KEY");
                 Command::new("wpa_cli")
                     .arg("-i")
                     .arg(IFACE_NAME)
@@ -383,7 +380,7 @@ impl ProvisioningBackend for WpaCliExclusive2Backend {
         }
 
         // 超时
-        println!("📡 [WpaCliExclusive2] Connection timed out");
+        println!("📡 [WpaCliTDM] Connection timed out");
         let _ = Command::new("wpa_cli")
             .arg("-i")
             .arg(IFACE_NAME)
