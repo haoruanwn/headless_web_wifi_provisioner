@@ -5,13 +5,10 @@ use futures_util::stream::StreamExt;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::{Arc, Mutex};
-use tokio::process::Command;
+use tokio::process::{Child, Command};
 use zbus::Connection;
 use zbus::zvariant::{ObjectPath, OwnedValue};
 use zbus_macros::proxy;
-// DHCP implementation for provisioning mode
-#[cfg(feature = "backend_wpa_dbus")]
-mod dhcp;
 
 const IFACE_NAME: &str = "wlan0";
 const AP_IP_ADDR: &str = "192.168.4.1/24";
@@ -48,16 +45,8 @@ trait WpaInterface {
 #[derive(Debug)]
 pub struct DbusBackend {
     hostapd_pid: Arc<Mutex<Option<u32>>>,
+    dnsmasq: Arc<Mutex<Option<Child>>>,
     connection: Connection,
-    #[cfg(feature = "backend_wpa_dbus")]
-    dhcp_task: Arc<
-        Mutex<
-            Option<(
-                tokio::sync::oneshot::Sender<()>,
-                tokio::task::JoinHandle<()>,
-            )>,
-        >,
-    >,
 }
 
 impl DbusBackend {
@@ -65,9 +54,8 @@ impl DbusBackend {
         let connection = Connection::system().await?;
         Ok(Self {
             hostapd_pid: Arc::new(Mutex::new(None)),
+            dnsmasq: Arc::new(Mutex::new(None)),
             connection,
-            #[cfg(feature = "backend_wpa_dbus")]
-            dhcp_task: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -137,21 +125,34 @@ impl ProvisioningBackend for DbusBackend {
                 "Could not get PID for hostapd process".to_string(),
             ));
         }
-        // Start DHCP server (edge-dhcp) when provisioning mode is entered.
-        #[cfg(feature = "backend_wpa_dbus")]
-        {
-            self.start_dhcp_server().await?;
-        }
+        
+        // Start dnsmasq process
+        println!("📡 [DbusBackend] Starting dnsmasq...");
+        let ap_ip_only = AP_IP_ADDR.split('/').next().unwrap_or("");
+        let dnsmasq_child = Command::new("dnsmasq")
+            .arg(format!("--interface={}", IFACE_NAME))
+            .arg("--dhcp-range=192.168.4.100,192.168.4.200,12h")
+            .arg(format!("--address=/#/{}", ap_ip_only))
+            .arg("--no-resolv")
+            .arg("--no-hosts")
+            .arg("--no-daemon")
+            .spawn()?;
+        
+        *self.dnsmasq.lock().unwrap() = Some(dnsmasq_child);
+
         Ok(())
     }
 
     async fn exit_provisioning_mode(&self) -> Result<()> {
         println!("📡 [DbusBackend] Exiting provisioning mode...");
 
-        // Stop DHCP server first if running
-        #[cfg(feature = "backend_wpa_dbus")]
-        {
-            self.stop_dhcp_server().await?;
+        // Stop dnsmasq process
+        println!("📡 [DbusBackend] Stopping dnsmasq...");
+        let dnsmasq_child_to_kill = self.dnsmasq.lock().unwrap().take();
+        if let Some(mut child) = dnsmasq_child_to_kill {
+            if let Err(e) = child.kill().await {
+                tracing::warn!("Failed to kill dnsmasq process: {}", e);
+            }
         }
 
         let pid_to_kill = { *self.hostapd_pid.lock().unwrap() };
@@ -258,33 +259,6 @@ impl ProvisioningBackend for DbusBackend {
             "📡 [DbusBackend] Connection process initiated for '{}'",
             ssid
         );
-        Ok(())
-    }
-}
-
-// DHCP server control (starts/stops edge-dhcp in a background task)
-#[cfg(feature = "backend_wpa_dbus")]
-impl DbusBackend {
-    async fn start_dhcp_server(&self) -> Result<()> {
-        // In-process minimal DHCP responder
-        let ip_str = AP_IP_ADDR.split('/').next().unwrap_or(AP_IP_ADDR);
-        let ap_ip: std::net::Ipv4Addr = ip_str
-            .parse()
-            .map_err(|e| Error::CommandFailed(format!("Invalid AP IP: {}", e)))?;
-
-        let (shutdown_tx, handle) = crate::backends::wpa_supplicant_dbus::dhcp::spawn_server(ap_ip);
-        *self.dhcp_task.lock().unwrap() = Some((shutdown_tx, handle));
-        tracing::info!("Started in-process mini DHCP responder");
-        Ok(())
-    }
-
-    async fn stop_dhcp_server(&self) -> Result<()> {
-        let opt = self.dhcp_task.lock().unwrap().take();
-        if let Some((shutdown_tx, handle)) = opt {
-            tracing::info!("Stopping in-process mini DHCP responder...");
-            let _ = shutdown_tx.send(());
-            let _ = handle.await;
-        }
         Ok(())
     }
 }

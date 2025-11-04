@@ -22,6 +22,19 @@ wpa_key_mgmt=WPA-PSK
 wpa_passphrase=12345678
 rsn_pairwise=CCMP
 ```
+```bash
+# 创建新的 wpa_supplicant AP 配置文件
+cat > /etc/wpa_supplicant_ap.conf << EOF
+# AP模式的基础网络
+network={
+    ssid="Echo-mate-Setup"
+    mode=2
+    key_mgmt=WPA-PSK
+    psk="12345678"
+    frequency=2437
+}
+EOF
+```
 需要在buildroot里开启如下功能，并确保在shell里能检测到
 
 ```bash
