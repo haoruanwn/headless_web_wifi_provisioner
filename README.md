@@ -36,3 +36,9 @@ cross build \
   --config 'target.armv7-unknown-linux-musleabihf.rustflags=["-C", "target-feature=+crt-static"]'
 ```
 
+运行的时候查看日志：
+
+```bash
+export RUST_LOG="debug,tower_http=debug"
+```
+

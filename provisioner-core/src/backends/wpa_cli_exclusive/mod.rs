@@ -231,7 +231,9 @@ impl ProvisioningBackend for WpaCliExclusiveBackend {
             )));
         }
 
-        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        // 等待更长的时间以降低时序（race）问题的概率
+        println!("📡 [WpaCliExclusive] Waiting for scan results (5 seconds)...");
+        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
 
         let output = Command::new("wpa_cli")
             .arg("-i")
@@ -249,7 +251,12 @@ impl ProvisioningBackend for WpaCliExclusiveBackend {
             )));
         }
 
-        let stdout = String::from_utf8_lossy(&output.stdout);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // 关键调试日志：输出 scan_results 原始文本，便于排查空结果的原因
+    println!("📡 [WpaCliExclusive] --- SCAN RESULTS ---");
+    println!("{}", stdout);
+    println!("📡 [WpaCliExclusive] --------------------");
         let networks = Self::parse_scan_results(&stdout)?;
 
         // 3. 重启 AP
