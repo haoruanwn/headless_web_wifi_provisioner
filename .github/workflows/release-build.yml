@@ -12,7 +12,7 @@ jobs:
   # JOB 1: 并行构建 (Fan-out)
   # ----------------------------------------------------
   build-assets:
-    name: "Build ${{ matrix.asset_suffix }}" # Job名称更清晰
+    name: "Build ${{ matrix.asset_suffix }}" 
     runs-on: ubuntu-latest
     
     strategy:
@@ -93,7 +93,11 @@ jobs:
       contents: write # 只需要这个Job有写权限
 
     steps:
-      - name: "1. Create Release"
+
+      - name: "1. Checkout Repository"
+        uses: actions/checkout@v4
+
+      - name: "2. Create Release"
         id: create_release
         uses: actions/create-release@v1
         env:
@@ -105,14 +109,14 @@ jobs:
             prerelease: false
 
       # --- 修改点 3: 下载所有 Artifacts ---
-      - name: "2. Download All Artifacts"
+      - name: "3. Download All Artifacts"
         uses: actions/download-artifact@v4
         with:
           # 不指定 name，会下载所有 Artifacts
           path: artifacts # 下载到 'artifacts' 文件夹
 
       # --- 修改点 4: 循环上传所有产物 ---
-      - name: "3. Upload All Release Assets"
+      - name: "4. Upload All Release Assets"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
