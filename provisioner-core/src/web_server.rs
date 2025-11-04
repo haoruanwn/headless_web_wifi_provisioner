@@ -1,12 +1,12 @@
 use crate::traits::{ProvisioningBackend, UiAssetProvider};
+use axum::body::Body;
 use axum::{
+    Json, Router,
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
     routing::{get, post},
-    Json, Router,
 };
-use axum::body::Body;
 use serde::Deserialize;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -74,21 +74,28 @@ async fn serve_static_asset(
     State(state): WebServerState,
     Path(path): Path<String>,
 ) -> impl IntoResponse {
+    // 添加日志
+    tracing::trace!(asset_path = %path, "Attempting to serve static asset");
     match state.frontend.get_asset(&path).await {
         Ok((data, mime)) => Response::builder()
             .status(StatusCode::OK)
             .header("Content-Type", mime)
             .body(Body::from(data)) // Explicitly convert to `axum::body::Body`
             .unwrap(),
-        Err(_) => Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .body(Body::from(format!("Asset not found: {}", path)))
-            .unwrap(),
+        Err(e) => {
+            // 【添加】当文件未找到时，打印一条警告日志
+            tracing::warn!(asset_path = %path, "Asset not found: {}", e);
+            Response::builder()
+                .status(StatusCode::NOT_FOUND)
+                .body(Body::from(format!("Asset not found: {}", path)))
+                .unwrap()
+        }
     }
 }
 
 /// API endpoint to scan for Wi-Fi networks.
 async fn api_scan_wifi(State(state): WebServerState) -> impl IntoResponse {
+    tracing::debug!("Handling /api/scan request");
     match state.backend.scan().await {
         Ok(networks) => (StatusCode::OK, Json(networks)).into_response(),
         Err(e) => (
@@ -110,20 +117,32 @@ async fn api_connect_wifi(
     State(state): WebServerState,
     Json(payload): Json<ConnectRequest>,
 ) -> impl IntoResponse {
-    match state.backend.connect(&payload.ssid, &payload.password).await {
+    tracing::debug!(ssid = %payload.ssid, "Handling /api/connect request");
+    match state
+        .backend
+        .connect(&payload.ssid, &payload.password)
+        .await
+    {
         Ok(_) => {
-            println!("Wi-Fi connection successful, exiting provisioning mode.");
+            tracing::info!("Wi-Fi connection successful, exiting provisioning mode.");
             // On successful connection, tear down the AP
             if let Err(e) = state.backend.exit_provisioning_mode().await {
-                eprintln!("Error exiting provisioning mode: {}", e);
+                tracing::error!("Error exiting provisioning mode: {}", e);
                 // Fall through to return success to the user anyway, as Wi-Fi is connected.
             }
-            (StatusCode::OK, Json(serde_json::json!({ "status": "success" }))).into_response()
-        },
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response(),
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({ "status": "success" })),
+            )
+                .into_response()
+        }
+        Err(e) => {
+            tracing::warn!("Connection failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": e.to_string() })),
+            )
+                .into_response()
+        }
     }
 }
