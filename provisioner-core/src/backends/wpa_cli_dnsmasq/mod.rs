@@ -10,14 +10,14 @@ const AP_IP_ADDR: &str = "192.168.4.1/24";
 /// A backend that uses `wpa_cli` and `dnsmasq` command-line tools.
 #[derive(Debug)]
 pub struct WpaCliDnsmasqBackend {
-    hostapd: Arc<Mutex<Option<Child>>>,
+    wpa_supplicant: Arc<Mutex<Option<Child>>>,
     dnsmasq: Arc<Mutex<Option<Child>>>,
 }
 
 impl WpaCliDnsmasqBackend {
     pub fn new() -> Result<Self> {
         Ok(Self {
-            hostapd: Arc::new(Mutex::new(None)),
+            wpa_supplicant: Arc::new(Mutex::new(None)),
             dnsmasq: Arc::new(Mutex::new(None)),
         })
     }
@@ -47,13 +47,15 @@ impl ProvisioningBackend for WpaCliDnsmasqBackend {
             }
         }
 
-        // 2. Start hostapd (without -B)
-        let hostapd_child = Command::new("hostapd")
-            .arg("/etc/hostapd.conf")
+        // 2. Start wpa_supplicant in AP mode
+        let wpa_child = Command::new("wpa_supplicant")
+            .arg("-B")
+            .arg(format!("-i{}", IFACE_NAME))
+            .arg("-c/etc/wpa_supplicant_ap.conf")
             .spawn()?;
-        *self.hostapd.lock().unwrap() = Some(hostapd_child);
+        *self.wpa_supplicant.lock().unwrap() = Some(wpa_child);
 
-        // 3. Start dnsmasq (with --no-daemon)
+        // 3. Start dnsmasq
         let ap_ip_only = AP_IP_ADDR.split('/').next().unwrap_or("");
         let dnsmasq_child = Command::new("dnsmasq")
             .arg(format!("--interface={}", IFACE_NAME))
@@ -71,16 +73,25 @@ impl ProvisioningBackend for WpaCliDnsmasqBackend {
     async fn exit_provisioning_mode(&self) -> Result<()> {
         println!("📡 [WpaCliDnsmasqBackend] Exiting provisioning mode...");
 
+        // 1. Stop dnsmasq
         let dnsmasq_child_to_kill = self.dnsmasq.lock().unwrap().take();
         if let Some(mut child) = dnsmasq_child_to_kill {
-            child.kill().await?;
+            let _ = child.kill().await;
         }
 
-        let hostapd_child_to_kill = self.hostapd.lock().unwrap().take();
-        if let Some(mut child) = hostapd_child_to_kill {
-            child.kill().await?;
+        // 2. Stop wpa_supplicant
+        let wpa_child_to_kill = self.wpa_supplicant.lock().unwrap().take();
+        if let Some(mut child) = wpa_child_to_kill {
+            let _ = child.kill().await;
         }
+        // Also use wpa_cli to ensure it's terminated
+        let _ = Command::new("wpa_cli")
+            .arg(format!("-i{}", IFACE_NAME))
+            .arg("terminate")
+            .output()
+            .await;
 
+        // 3. Clean up IP address
         let output = Command::new("ip")
             .arg("addr")
             .arg("del")

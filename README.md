@@ -10,16 +10,16 @@
    cargo run --features "provisioner-daemon/backend_mock, provisioner-daemon/ui_echo_mate"
    ```
 
-2. 本地编译（wpa_cli后端+echo-mate 主题）
+2. 本地编译（systemd后端+echo-mate 主题）
 
    ```bash
-   cargo run --features "provisioner-daemon/backend_wpa_cli, provisioner-daemon/ui_echo_mate"
+   cargo run --features "provisioner-daemon/backend_systemd, provisioner-daemon/ui_echo_mate"
    ```
 
-3. 交叉编译（使用于buildroot的D-Bus后端+ echo-mate 主题）
+3. 交叉编译（使用于buildroot的wpa_cli后端+ echo-mate 主题）
 
    ```bash
-   cargo build --target=<target> --release --features "provisioner-daemon/backend_wpa_dbus, provisioner-daemon/ui_echo_mate"
+   cargo build --target=<target> --release --features "provisioner-daemon/backend_wpa_cli, provisioner-daemon/ui_echo_mate"
    ```
 
 
