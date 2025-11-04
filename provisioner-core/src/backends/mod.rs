@@ -16,3 +16,7 @@ pub mod wpa_cli_dnsmasq;
 #[cfg(feature = "backend_wpa_cli_exclusive")]
 
 pub mod wpa_cli_exclusive;
+
+
+#[cfg(feature = "backend_wpa_cli_exclusive2")]
+pub mod wpa_cli_exclusive2;
