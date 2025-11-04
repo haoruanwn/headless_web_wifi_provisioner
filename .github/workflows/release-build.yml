@@ -25,7 +25,7 @@ jobs:
 
           - target: armv7-unknown-linux-musleabihf
             asset_suffix: wpa_cli-dnsmasq-armv7-musleabihf
-            features: "provisioner-daemon/backend_wpa_cli,provisioner-daemon/ui_echo_mate"
+            features: "provisioner-daemon/backend_wpa_cli_exclusive,provisioner-daemon/ui_echo_mate"
             env_rustflags: "-C target-feature=+crt-static"
 
     steps:
