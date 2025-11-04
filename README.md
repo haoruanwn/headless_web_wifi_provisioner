@@ -13,7 +13,7 @@
 2. 本地编译（systemd后端+Bootstrap 主题）
 
    ```bash
-   cargo run --features "provisioner-daemon/backend_mock, provisioner-daemon/ui_simple"
+   cargo run --features "provisioner-daemon/backend_mock, provisioner-daemon/ui_bootstrap"
    ```
 
 3. 交叉编译（使用于buildroot的D-Bus后端+Bootstrap 主题）

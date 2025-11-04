@@ -24,9 +24,16 @@ jobs:
         include:
           - target: armv7-unknown-linux-musleabihf
           # 添加release的文件后缀以区分不同架构的二进制文件
-            asset_suffix: echo_mate_armv7-musleabihf
+            asset_suffix: wpa_supplicant-dbus-armv7-musleabihf
             features: "provisioner-daemon/backend_wpa_dbus,provisioner-daemon/ui_bootstrap"
             env_rustflags: "-C target-feature=+crt-static"
+
+          - target: armv7-unknown-linux-musleabihf
+          # 添加release的文件后缀以区分不同架构的二进制文件
+            asset_suffix: wpa_cli-dnsmasq-armv7-musleabihf
+            features: "provisioner-daemon/backend_wpa_cli,provisioner-daemon/ui_bootstrap"
+            env_rustflags: "-C target-feature=+crt-static"
+
 
         #   - target: x86_64-unknown-linux-musl
         #     asset_suffix: x86_64-musl

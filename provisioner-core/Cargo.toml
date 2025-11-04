@@ -40,6 +40,7 @@ default = []
 # === 1. 后端实现选择 (隐式决定交付方式) ===
 backend_wpa_dbus = ["zbus", "zbus_macros", "futures-util", "libc"] # Real backend -> embed
 backend_systemd = []             # Real backend -> embed (uses always-present deps)
+backend_wpa_cli = []               # Real backend -> embed (uses wpa_cli and dnsmasq)
 backend_mock = ["dep:tower-http"]                # Mock backend -> disk
 
 # === 2. UI 主题选择 ===

@@ -11,6 +11,7 @@ async fn main() -> anyhow::Result<()> {
     // --- Compile-time validation to ensure exactly one backend is selected ---
     const BACKEND_COUNT: usize = cfg!(feature = "backend_mock") as usize
         + cfg!(feature = "backend_wpa_dbus") as usize
+        + cfg!(feature = "backend_wpa_cli") as usize
         + cfg!(feature = "backend_systemd") as usize;
     const _: () = assert!(
         BACKEND_COUNT == 1,
@@ -41,6 +42,11 @@ async fn main() -> anyhow::Result<()> {
     let backend: Arc<dyn provisioner_core::traits::ProvisioningBackend> = {
         println!("🐧 Backend: Systemd Networkd selected");
         Arc::new(provisioner_core::backends::systemd_networkd::SystemdNetworkdBackend::new())
+    };
+    #[cfg(feature = "backend_wpa_cli")]
+    let backend: Arc<dyn provisioner_core::traits::ProvisioningBackend> = {
+        println!("CLI Backend: WPA CLI + Dnsmasq selected");
+        Arc::new(provisioner_core::backends::wpa_cli_dnsmasq::WpaCliDnsmasqBackend::new()?)
     };
 
     // Frontend provider is now chosen IMPLICITLY based on the backend selection.

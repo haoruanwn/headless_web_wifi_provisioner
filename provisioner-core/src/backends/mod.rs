@@ -6,3 +6,6 @@ pub mod mock;
 
 #[cfg(feature = "backend_systemd")]
 pub mod systemd_networkd;
+
+#[cfg(feature = "backend_wpa_cli")]
+pub mod wpa_cli_dnsmasq;
