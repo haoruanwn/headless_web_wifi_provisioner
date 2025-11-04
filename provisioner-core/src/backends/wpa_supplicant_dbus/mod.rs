@@ -1,7 +1,6 @@
 use crate::traits::{Network, ProvisioningBackend};
 use crate::{Error, Result};
 use async_trait::async_trait;
-use futures_util::stream::StreamExt;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::{Arc, Mutex};
@@ -98,6 +97,8 @@ impl DbusBackend {
 impl ProvisioningBackend for DbusBackend {
     async fn enter_provisioning_mode(&self) -> Result<()> {
         println!("📡 [DbusBackend] Entering provisioning mode...");
+        
+        // 1. Set IP
         let output = Command::new("ip")
             .arg("addr")
             .arg("add")
@@ -108,11 +109,16 @@ impl ProvisioningBackend for DbusBackend {
             .await?;
         if !output.status.success() {
             let error_msg = String::from_utf8_lossy(&output.stderr);
-            return Err(Error::CommandFailed(format!(
-                "Failed to set IP address: {}",
-                error_msg
-            )));
+            if !error_msg.contains("File exists") {
+                return Err(Error::CommandFailed(format!(
+                    "Failed to set IP address: {}",
+                    error_msg
+                )));
+            } else {
+                tracing::warn!("IP address {} already exists on {}, proceeding.", AP_IP_ADDR, IFACE_NAME);
+            }
         }
+
         let child = Command::new("hostapd")
             .arg("/etc/hostapd.conf")
             .arg("-B")
@@ -167,6 +173,8 @@ impl ProvisioningBackend for DbusBackend {
                 );
             }
         }
+        
+        // Clean up IP
         let output = Command::new("ip")
             .arg("addr")
             .arg("del")
@@ -176,62 +184,65 @@ impl ProvisioningBackend for DbusBackend {
             .output()
             .await?;
         if !output.status.success() {
-            return Err(Error::CommandFailed(format!(
-                "Failed to clean up IP address: {}",
-                String::from_utf8_lossy(&output.stderr)
-            )));
+            let error_msg = String::from_utf8_lossy(&output.stderr);
+            if !error_msg.contains("Cannot assign requested address") {
+                 return Err(Error::CommandFailed(format!(
+                    "Failed to clean up IP address: {}",
+                    error_msg
+                )));
+            }
         }
         println!("📡 [DbusBackend] Provisioning mode exited.");
         Ok(())
     }
 
     async fn scan(&self) -> Result<Vec<Network>> {
-        println!("📡 [DbusBackend] Scanning for networks via D-Bus...");
-        let iface_proxy = self.get_iface_proxy().await?;
-        let mut scan_done_stream = iface_proxy.receive_scan_done().await?;
+        println!("📡 [DbusBackend] Scanning for networks via wpa_cli...");
 
-        iface_proxy.scan(HashMap::new()).await?;
-        scan_done_stream.next().await;
+        let output = Command::new("wpa_cli")
+            .arg("-i")
+            .arg(IFACE_NAME)
+            .arg("scan")
+            .output()
+            .await?;
 
-        let bss_paths = iface_proxy.bsss().await?;
-        let mut networks = Vec::new();
-
-        for path in bss_paths {
-            let obj_path = ObjectPath::try_from(path.as_str())?;
-            let prop_proxy =
-                PropertiesProxy::new(&self.connection, WPA_S_SERVICE, &obj_path).await?;
-            let props = prop_proxy.get_all("fi.w1.wpa_supplicant1.BSS").await?;
-
-            if let (Some(ssid_val), Some(signal_val)) = (props.get("SSID"), props.get("Signal")) {
-                // Try to convert OwnedValue into Vec<u8> and i16 respectively
-                if let Ok(bytes) = <OwnedValue as TryInto<Vec<u8>>>::try_into(ssid_val.clone()) {
-                    if let Ok(ssid) = String::from_utf8(bytes) {
-                        // Basic security detection
-                        let security = if props.contains_key("RSN") {
-                            "WPA2/3".to_string()
-                        } else if props.contains_key("WPA") {
-                            "WPA".to_string()
-                        } else {
-                            "Open".to_string()
-                        };
-
-                        if let Ok(signal) =
-                            <OwnedValue as TryInto<i16>>::try_into(signal_val.clone())
-                        {
-                            // Convert signal from dBm to a rough 0-100 percentage.
-                            let signal_percent = ((signal.clamp(-100i16, -50i16) + 100) * 2) as u8;
-
-                            networks.push(Network {
-                                ssid,
-                                signal: signal_percent,
-                                security,
-                            });
-                        }
-                    }
-                }
+        if !output.status.success() {
+            let error_msg = String::from_utf8_lossy(&output.stderr);
+            if error_msg.contains("Failed to connect to wpa_supplicant") {
+                return Err(Error::CommandFailed(
+                    "wpa_supplicant service is not running or not accessible".to_string(),
+                ));
             }
+            if error_msg.contains("rfkill") {
+                 return Err(Error::CommandFailed(
+                    "Scan failed, device is blocked by rfkill".to_string(),
+                ));
+            }
+            return Err(Error::CommandFailed(format!(
+                "wpa_cli scan failed: {}",
+                error_msg
+            )));
         }
-        Ok(networks)
+
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+        let output = Command::new("wpa_cli")
+            .arg("-i")
+            .arg(IFACE_NAME)
+            .arg("scan_results")
+            .output()
+            .await?;
+
+        if !output.status.success() {
+            let error_msg = String::from_utf8_lossy(&output.stderr);
+            return Err(Error::CommandFailed(format!(
+                "wpa_cli scan_results failed: {}",
+                error_msg
+            )));
+        }
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        parse_scan_results(&stdout)
     }
 
     async fn connect(&self, ssid: &str, password: &str) -> Result<()> {
@@ -261,4 +272,39 @@ impl ProvisioningBackend for DbusBackend {
         );
         Ok(())
     }
+}
+
+fn parse_scan_results(output: &str) -> Result<Vec<Network>> {
+    let mut networks = Vec::new();
+    for line in output.lines().skip(1) {
+        let parts: Vec<&str> = line.split('\t').collect();
+        if parts.len() >= 5 {
+            let signal_level: i16 = parts[2].parse().unwrap_or(0);
+            let flags = parts[3];
+            let ssid = parts[4].to_string();
+
+            if ssid.is_empty() || ssid == "\\x00" {
+                continue;
+            }
+
+            let security = if flags.contains("WPA2") {
+                "WPA2".to_string()
+            } else if flags.contains("WPA") {
+                "WPA".to_string()
+            } else if flags.contains("WEP") {
+                "WEP".to_string()
+            } else {
+                "Open".to_string()
+            };
+
+            let signal_percent = ((signal_level.clamp(-100, -50) + 100) * 2) as u8;
+
+            networks.push(Network {
+                ssid,
+                signal: signal_percent,
+                security,
+            });
+        }
+    }
+    Ok(networks)
 }
