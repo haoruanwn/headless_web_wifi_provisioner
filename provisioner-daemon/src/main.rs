@@ -1,4 +1,4 @@
-use provisioner_core::traits::UiAssetProvider;
+use provisioner_core::traits::{UiAssetProvider, ProvisioningTerminator};
 use std::sync::Arc;
 
 mod runner;
@@ -31,8 +31,49 @@ async fn main() -> anyhow::Result<()> {
 
     let frontend = create_static_frontend();
 
-    // 将策略分发委托给 policy 模块（按编译时 feature 选择）
-    policy::dispatch(frontend).await?;
+    // --- Create backend early and inject into policy ---
+    // 编译时验证：确保只选择一个后端
+    const BACKEND_COUNT: usize = cfg!(feature = "backend_mock") as usize
+        + cfg!(feature = "backend_wpa_dbus") as usize
+        + cfg!(feature = "backend_wpa_cli") as usize
+        + cfg!(feature = "backend_wpa_cli_exclusive") as usize
+        + cfg!(feature = "backend_wpa_cli_TDM") as usize
+        + cfg!(feature = "backend_networkmanager_TDM") as usize
+        + cfg!(feature = "backend_systemd") as usize;
+    const _: () = assert!(BACKEND_COUNT == 1, "Select exactly ONE backend.");
+    let _ = BACKEND_COUNT;
+
+    #[cfg(feature = "backend_wpa_cli_TDM")]
+    {
+        println!("📡 Backend: WPA CLI TDM (Static Dispatch)");
+        let backend = Arc::new(provisioner_core::backends::wpa_cli_TDM::WpaCliTdmBackend::new()?);
+        policy::dispatch(frontend, backend).await?;
+    }
+
+    #[cfg(feature = "backend_networkmanager_TDM")]
+    {
+        println!("📡 Backend: NetworkManager TDM (Static Dispatch)");
+        let backend = Arc::new(
+            provisioner_core::backends::networkmanager_TDM::NetworkManagerTdmBackend::new()?
+        );
+        policy::dispatch(frontend, backend).await?;
+    }
+
+    #[cfg(feature = "backend_wpa_dbus")]
+    {
+        println!("📡 Backend: WPA Supplicant D-Bus (Static Dispatch)");
+        let backend = Arc::new(
+            provisioner_core::backends::wpa_supplicant_dbus::DbusBackend::new().await?,
+        );
+        policy::dispatch(frontend, backend).await?;
+    }
+
+    #[cfg(feature = "backend_mock")]
+    {
+        println!("🔧 Backend: MockBackend (Static Dispatch)");
+        let backend = Arc::new(provisioner_core::backends::mock::MockBackend::new());
+        policy::dispatch(frontend, backend).await?;
+    }
 
     Ok(())
 }
