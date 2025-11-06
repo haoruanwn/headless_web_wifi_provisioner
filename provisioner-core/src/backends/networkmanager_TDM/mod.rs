@@ -21,7 +21,7 @@ pub struct NetworkManagerTdmBackend {
 }
 
 const PROV_SSID: &str = "ProvisionerAP";
-const PROV_PSK: &str = "provisioner123";
+const PROV_PSK: &str = "20542054";
 
 impl NetworkManagerTdmBackend {
     pub fn new() -> Result<Self> {
@@ -46,6 +46,9 @@ impl NetworkManagerTdmBackend {
             .arg(PROV_SSID)
             .arg("password")
             .arg(PROV_PSK)
+            // Force nmcli to use the IP address expected by the web_server
+            .arg("ipv4.addresses")
+            .arg(AP_IP_ADDR)
             .output()
             .await?;
 
