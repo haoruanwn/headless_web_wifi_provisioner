@@ -12,42 +12,9 @@ pub struct Network {
     pub security: String, // e.g., "WPA2", "WEP", "Open"
 }
 
-/// Defines the interface for a Wi-Fi provisioning backend.
-/// This trait abstracts the underlying mechanism (D-Bus, mock, etc.)
-/// for scanning and connecting to Wi-Fi networks.
-#[async_trait]
-pub trait ProvisioningBackend: Send + Sync {
-    /// Prepares and enters the provisioning mode.
-    /// This typically involves starting an Access Point (e.g., hostapd),
-    /// configuring an IP address, and starting DHCP/DNS services.
-    /// Wi-Fi切换为AP模式，开始配网
-    async fn enter_provisioning_mode(&self) -> crate::Result<()>;
-
-    /// Exits the provisioning mode and cleans up resources.
-    /// This typically involves stopping the Access Point, cleaning up the IP address,
-    /// and switching the interface to station (STA) mode.
-    /// Wi-Fi退出AP模式，清理资源
-    async fn exit_provisioning_mode(&self) -> crate::Result<()>;
-
-    /// Scans for available Wi-Fi networks.
-    ///
-    /// # Returns
-    /// A `Result` containing a vector of `Network` structs on success,
-    /// or a `crate::error::Error` on failure.
-    /// 扫描可用的 Wi-Fi 网络。
-    async fn scan(&self) -> crate::Result<Vec<Network>>;
-
-    /// Attempts to connect to a Wi-Fi network.
-    ///
-    /// # Arguments
-    /// * `ssid` - The SSID of the network to connect to.
-    /// * `password` - The password for the network.
-    ///
-    /// # Returns
-    /// A `Result` indicating success or failure.
-    /// 尝试连接到 Wi-Fi 网络。
-    async fn connect(&self, ssid: &str, password: &str) -> crate::Result<()>;
-}
+// NOTE: Old `ProvisioningBackend` (dyn-based) removed.
+// We now use capability-based traits below: `ProvisioningTerminator`,
+// `ConcurrentBackend`, and `TdmBackend`.
 
 
 /// Defines the interface for providing UI assets.
@@ -99,37 +66,6 @@ pub trait TdmBackend: ProvisioningTerminator {
     async fn enter_provisioning_mode_with_scan(&self) -> crate::Result<Vec<Network>>;
 }
 
-// -----------------------------------------------------------------------------
-// 兼容层：对于仍然实现了旧的 `ProvisioningBackend` 的后端，
-// 自动为它们提供 `ProvisioningTerminator` / `ConcurrentBackend` 的实现，
-// 这样可以在逐步迁移时保持向后兼容。
-// -----------------------------------------------------------------------------
-
-#[async_trait]
-impl<T> ProvisioningTerminator for T
-where
-    T: ProvisioningBackend + Send + Sync,
-{
-    async fn connect(&self, ssid: &str, password: &str) -> crate::Result<()> {
-        ProvisioningBackend::connect(self, ssid, password).await
-    }
-
-    async fn exit_provisioning_mode(&self) -> crate::Result<()> {
-        ProvisioningBackend::exit_provisioning_mode(self).await
-    }
-}
-
-#[async_trait]
-impl<T> ConcurrentBackend for T
-where
-    T: ProvisioningBackend + Send + Sync,
-{
-    async fn enter_provisioning_mode(&self) -> crate::Result<()> {
-        ProvisioningBackend::enter_provisioning_mode(self).await
-    }
-
-    async fn scan(&self) -> crate::Result<Vec<Network>> {
-        ProvisioningBackend::scan(self).await
-    }
-}
+// No compatibility blanket impls: we require explicit implementations
+// of `ConcurrentBackend` or `TdmBackend` for selected backends.
 

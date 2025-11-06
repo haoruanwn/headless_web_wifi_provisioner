@@ -1,5 +1,5 @@
 use crate::Result;
-use crate::traits::{Network, ProvisioningBackend};
+use crate::traits::{ConcurrentBackend, Network, ProvisioningTerminator};
 use async_trait::async_trait;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -16,14 +16,9 @@ impl MockBackend {
 }
 
 #[async_trait]
-impl ProvisioningBackend for MockBackend {
+impl ConcurrentBackend for MockBackend {
     async fn enter_provisioning_mode(&self) -> Result<()> {
         println!("🤖 [MockBackend] Entering provisioning mode (simulated).");
-        Ok(())
-    }
-
-    async fn exit_provisioning_mode(&self) -> Result<()> {
-        println!("🤖 [MockBackend] Exiting provisioning mode (simulated).");
         Ok(())
     }
 
@@ -64,16 +59,15 @@ impl ProvisioningBackend for MockBackend {
         println!("🤖 [MockBackend] Found {} networks.", networks.len());
         Ok(networks)
     }
+}
 
+#[async_trait]
+impl ProvisioningTerminator for MockBackend {
     async fn connect(&self, ssid: &str, password: &str) -> Result<()> {
         println!(
             "🤖 [MockBackend] Attempting to connect to SSID: '{}' with password: '{}'",
             ssid,
-            if password.is_empty() {
-                "(empty)"
-            } else {
-                "********"
-            }
+            if password.is_empty() { "(empty)" } else { "********" }
         );
         // Simulate a connection delay
         sleep(Duration::from_secs(3)).await;
@@ -81,7 +75,6 @@ impl ProvisioningBackend for MockBackend {
         // Simulate a failure for a specific network for testing purposes
         if ssid == "xfinitywifi" {
             println!("🤖 [MockBackend] Connection failed to '{}'", ssid);
-            // In a real scenario, you would return a more specific error
             Err(crate::Error::Io(std::io::Error::new(
                 std::io::ErrorKind::ConnectionAborted,
                 "Simulated connection failure",
@@ -90,5 +83,10 @@ impl ProvisioningBackend for MockBackend {
             println!("🤖 [MockBackend] Connection successful to '{}'", ssid);
             Ok(())
         }
+    }
+
+    async fn exit_provisioning_mode(&self) -> Result<()> {
+        println!("🤖 [MockBackend] Exiting provisioning mode (simulated).");
+        Ok(())
     }
 }

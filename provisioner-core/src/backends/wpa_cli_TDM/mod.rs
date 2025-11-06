@@ -1,7 +1,7 @@
 // 后端：wpa_cli_TDM（时分复用调用 wpa_cli）
 // 基于之前的 wpa_cli_exclusive2 实现做了重命名并修复了 dnsmasq --address 参数。
 
-use crate::traits::{Network, ProvisioningBackend, TdmBackend};
+use crate::traits::{Network, ProvisioningTerminator, TdmBackend};
 use crate::{Error, Result};
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -207,13 +207,13 @@ impl WpaCliTdmBackend {
     }
 }
 
-#[async_trait]
-impl ProvisioningBackend for WpaCliTdmBackend {
+// Move connect/scan/enter/exit implementations into inherent impl
+impl WpaCliTdmBackend {
     /// 应用启动时会调用此方法（主程序会调用一次）。
     /// 我们的策略：先确保处于 STA 并扫描一次。
     /// - 如果扫描为空 -> 返回错误，停止后续操作。
     /// - 如果扫描有结果 -> 保存结果并启动 AP（展示结果）。
-    async fn enter_provisioning_mode(&self) -> Result<()> {
+    pub async fn enter_provisioning_mode(&self) -> Result<()> {
         println!("📡 [WpaCliTDM] Initializing: entering STA to scan...");
 
         // 确保 wpa_supplicant 运行
@@ -243,14 +243,14 @@ impl ProvisioningBackend for WpaCliTdmBackend {
         Ok(())
     }
 
-    async fn exit_provisioning_mode(&self) -> Result<()> {
+    pub async fn exit_provisioning_mode_impl(&self) -> Result<()> {
         println!("📡 [WpaCliTDM] Exiting provisioning mode (stop AP)");
         self.stop_ap().await?;
         Ok(())
     }
 
     /// 返回保存在本地的扫描结果（如果存在），否则执行实时扫描
-    async fn scan(&self) -> Result<Vec<Network>> {
+    pub async fn scan_impl(&self) -> Result<Vec<Network>> {
         if let Some(vec) = &*self.last_scan.lock().await {
             return Ok(vec.clone());
         }
@@ -260,7 +260,7 @@ impl ProvisioningBackend for WpaCliTdmBackend {
     }
 
     /// 连接逻辑：切换到 STA 尝试连接；失败后重新扫描并恢复 AP，并返回错误信息（会在 Web 界面展示）
-    async fn connect(&self, ssid: &str, password: &str) -> Result<()> {
+    pub async fn connect_impl(&self, ssid: &str, password: &str) -> Result<()> {
         println!("📡 [WpaCliTDM] Attempting connect: switching to STA...");
 
         // 停止 AP 并确保 wpa_supplicant 运行
@@ -400,10 +400,21 @@ impl ProvisioningBackend for WpaCliTdmBackend {
 }
 
 #[async_trait]
+impl ProvisioningTerminator for WpaCliTdmBackend {
+    async fn connect(&self, ssid: &str, password: &str) -> Result<()> {
+        self.connect_impl(ssid, password).await
+    }
+
+    async fn exit_provisioning_mode(&self) -> Result<()> {
+        self.exit_provisioning_mode_impl().await
+    }
+}
+
+#[async_trait]
 impl TdmBackend for WpaCliTdmBackend {
     async fn enter_provisioning_mode_with_scan(&self) -> Result<Vec<Network>> {
-        // reuse existing initialization that performs an initial scan and starts AP
-        ProvisioningBackend::enter_provisioning_mode(self).await?;
+        // reuse inherent implementation
+        self.enter_provisioning_mode().await?;
         if let Some(vec) = &*self.last_scan.lock().await {
             Ok(vec.clone())
         } else {

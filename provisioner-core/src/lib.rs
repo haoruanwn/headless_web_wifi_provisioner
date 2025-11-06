@@ -12,7 +12,8 @@ pub mod factory;
 // Define a shared Error and Result type for the entire crate.
 
 use thiserror::Error;
-use factory::{create_backend, create_frontend};
+// factory::create_backend removed in favor of static-dispatch main.rs. keep create_frontend via factory if needed.
+use factory::create_frontend;
 
 #[derive(Debug, Error)]
 pub enum Error {
