@@ -1,15 +1,14 @@
-use provisioner_core::traits::{UiAssetProvider, ProvisioningTerminator};
+use provisioner_core::traits::{UiAssetProvider, ProvisioningTerminator, TdmBackend, ConcurrentBackend};
 use std::sync::Arc;
+use crate::runner::BackendRunner; // Import the Enum
 
 mod runner;
 mod policy;
 
-// 静态分发的前端工厂
+// create_static_frontend() remains unchanged
 fn create_static_frontend() -> Arc<impl UiAssetProvider + 'static> {
-    // 编译时验证：确保只选择一个 UI 主题
     const UI_THEME_COUNT: usize = cfg!(feature = "ui_echo_mate") as usize + cfg!(feature = "ui_radxa_x4") as usize;
     const _: () = assert!(UI_THEME_COUNT == 1, "Select exactly ONE UI theme.");
-    // reference to silence dead_code when a cfg branch returns early
     let _ = UI_THEME_COUNT;
 
     #[cfg(feature = "backend_mock")]
@@ -24,45 +23,60 @@ fn create_static_frontend() -> Arc<impl UiAssetProvider + 'static> {
     }
 }
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
-    println!("🚀 Starting provisioner-daemon...");
-
-    let frontend = create_static_frontend();
-
-    // --- Create backend early and inject into policy ---
-    // 编译时验证：确保只选择一个后端（保留的后端：mock / wpa_cli_TDM / networkmanager_TDM）
-    const BACKEND_COUNT: usize = cfg!(feature = "backend_mock") as usize
-        + cfg!(feature = "backend_wpa_cli_TDM") as usize
-        + cfg!(feature = "backend_networkmanager_TDM") as usize;
-    const _: () = assert!(BACKEND_COUNT == 1, "Select exactly ONE backend.");
-    let _ = BACKEND_COUNT;
-
+// 1. New function to create both trait objects
+//    - policy_backend: For the policy layer (needs is_connected)
+//    - runner_backend: For the execution layer (needs TDM/Concurrent specifics)
+fn create_static_backend() -> anyhow::Result<(
+    Arc<dyn ProvisioningTerminator + Send + Sync + 'static>,
+    BackendRunner,
+)> {
+    
     #[cfg(feature = "backend_wpa_cli_TDM")]
     {
         println!("📡 Backend: WPA CLI TDM (Static Dispatch)");
         let backend = Arc::new(provisioner_core::backends::wpa_cli_TDM::WpaCliTdmBackend::new()?);
-        policy::dispatch(frontend, backend).await?;
+        // Return two Arcs: one for the policy (TdmBackend implements ProvisioningTerminator)
+        // and the other for the runner (wrapped in the Enum).
+        return Ok((backend.clone(), BackendRunner::Tdm(backend)));
     }
 
     #[cfg(feature = "backend_networkmanager_TDM")]
     {
         println!("📡 Backend: NetworkManager TDM (Static Dispatch)");
         let backend = Arc::new(
-            provisioner_core::backends::networkmanager_TDM::NetworkManagerTdmBackend::new()?
+            provisioner_core::backends::networkmanager_TDM::NetworkManagerTdmBackend::new()?,
         );
-        policy::dispatch(frontend, backend).await?;
+        return Ok((backend.clone(), BackendRunner::Tdm(backend)));
     }
-
-    // Note: the WPA D-Bus backend was removed from the supported feature set.
 
     #[cfg(feature = "backend_mock")]
     {
         println!("🔧 Backend: MockBackend (Static Dispatch)");
         let backend = Arc::new(provisioner_core::backends::mock::MockBackend::new());
-        policy::dispatch(frontend, backend).await?;
+        return Ok((backend.clone(), BackendRunner::Concurrent(backend)));
     }
+
+    // Compile-time check
+    #[cfg(not(any(
+        feature = "backend_wpa_cli_TDM",
+        feature = "backend_networkmanager_TDM",
+        feature = "backend_mock"
+    )))]
+    compile_error!("Select exactly ONE backend feature.");
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::init();
+    println!("🚀 Starting provisioner-daemon...");
+
+    let frontend = create_static_frontend();
+    
+    // 2. Create and destructure the two trait objects
+    let (policy_backend, runner_backend) = create_static_backend()?;
+
+    // 3. Inject the trait objects into policy::dispatch, no more cfg needed here
+    policy::dispatch(frontend, policy_backend, runner_backend).await?;
 
     Ok(())
 }

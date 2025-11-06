@@ -1,77 +1,34 @@
-use provisioner_core::traits::UiAssetProvider;
+use provisioner_core::traits::{UiAssetProvider, ProvisioningTerminator};
 use std::sync::Arc;
+use crate::runner::BackendRunner; // Import BackendRunner
 
 pub mod on_start;
 pub mod daemon_if_disconnected;
 
-/// 策略调度器：根据编译时选择的 policy feature 调用对应实现。
-
-#[cfg(feature = "backend_wpa_cli_TDM")]
-pub async fn dispatch<F>(frontend: Arc<F>, backend: Arc<provisioner_core::backends::wpa_cli_TDM::WpaCliTdmBackend>) -> anyhow::Result<()>
+// Remove all cfg blocks!
+pub async fn dispatch<F>(
+    frontend: Arc<F>,
+    policy_backend: Arc<dyn ProvisioningTerminator + Send + Sync + 'static>,
+    runner_backend: BackendRunner,
+) -> anyhow::Result<()>
 where
     F: UiAssetProvider + 'static,
 {
+    // The policy selection logic remains unchanged
     const POLICY_COUNT: usize = cfg!(feature = "policy_on_start") as usize
         + cfg!(feature = "policy_daemon_if_disconnected") as usize;
-    const _: () = assert!(POLICY_COUNT == 1, "Select exactly ONE policy feature (e.g., policy_on_start).");
+    const _: () = assert!(POLICY_COUNT == 1, "Select exactly ONE policy...");
     let _ = POLICY_COUNT;
 
     #[cfg(feature = "policy_on_start")]
     {
-        on_start::run(frontend.clone(), backend.clone()).await?;
+        // Pass the trait object and enum
+        on_start::run(frontend.clone(), policy_backend.clone(), runner_backend).await?;
     }
 
     #[cfg(feature = "policy_daemon_if_disconnected")]
     {
-        daemon_if_disconnected::run(frontend, backend).await?;
-    }
-
-    Ok(())
-}
-
-#[cfg(feature = "backend_networkmanager_TDM")]
-pub async fn dispatch<F>(frontend: Arc<F>, backend: Arc<provisioner_core::backends::networkmanager_TDM::NetworkManagerTdmBackend>) -> anyhow::Result<()>
-where
-    F: UiAssetProvider + 'static,
-{
-    const POLICY_COUNT: usize = cfg!(feature = "policy_on_start") as usize
-        + cfg!(feature = "policy_daemon_if_disconnected") as usize;
-    const _: () = assert!(POLICY_COUNT == 1, "Select exactly ONE policy feature (e.g., policy_on_start).");
-    let _ = POLICY_COUNT;
-
-    #[cfg(feature = "policy_on_start")]
-    {
-        on_start::run(frontend.clone(), backend.clone()).await?;
-    }
-
-    #[cfg(feature = "policy_daemon_if_disconnected")]
-    {
-        daemon_if_disconnected::run(frontend, backend).await?;
-    }
-
-    Ok(())
-}
-
-// NOTE: backend_wpa_dbus dispatch specialization removed with that feature.
-
-#[cfg(feature = "backend_mock")]
-pub async fn dispatch<F>(frontend: Arc<F>, backend: Arc<provisioner_core::backends::mock::MockBackend>) -> anyhow::Result<()>
-where
-    F: UiAssetProvider + 'static,
-{
-    const POLICY_COUNT: usize = cfg!(feature = "policy_on_start") as usize
-        + cfg!(feature = "policy_daemon_if_disconnected") as usize;
-    const _: () = assert!(POLICY_COUNT == 1, "Select exactly ONE policy feature (e.g., policy_on_start).");
-    let _ = POLICY_COUNT;
-
-    #[cfg(feature = "policy_on_start")]
-    {
-        on_start::run(frontend.clone(), backend.clone()).await?;
-    }
-
-    #[cfg(feature = "policy_daemon_if_disconnected")]
-    {
-        daemon_if_disconnected::run(frontend, backend).await?;
+        daemon_if_disconnected::run(frontend, policy_backend, runner_backend).await?;
     }
 
     Ok(())

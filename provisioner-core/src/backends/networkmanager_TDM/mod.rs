@@ -102,36 +102,6 @@ impl NetworkManagerTdmBackend {
                 .arg(&name)
                 .output()
                 .await;
-        } else {
-            // fallback: try to bring down any active wifi connection on IFACE_NAME
-            let list = Command::new("nmcli")
-                .arg("-t")
-                .arg("-f")
-                .arg("NAME,DEVICE,TYPE")
-                .arg("connection")
-                .arg("show")
-                .arg("--active")
-                .output()
-                .await?;
-            if list.status.success() {
-                let txt = String::from_utf8_lossy(&list.stdout);
-                for line in txt.lines() {
-                    let parts: Vec<&str> = line.split(':').collect();
-                    if parts.len() >= 3 {
-                        let name = parts[0];
-                        let device = parts[1];
-                        let typ = parts[2];
-                        if device == IFACE_NAME && typ.to_lowercase().contains("wifi") {
-                            let _ = Command::new("nmcli")
-                                .arg("connection")
-                                .arg("down")
-                                .arg(name)
-                                .output()
-                                .await;
-                        }
-                    }
-                }
-            }
         }
 
         Ok(())

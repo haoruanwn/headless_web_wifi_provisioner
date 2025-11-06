@@ -1,34 +1,33 @@
-use provisioner_core::{web_server, traits::UiAssetProvider};
+use provisioner_core::{
+    web_server,
+    traits::{UiAssetProvider, TdmBackend, ConcurrentBackend, ProvisioningTerminator},
+};
 use std::sync::Arc;
 
-// 运行配网服务器的封装逻辑（现在接受由 main 创建并注入的后端）
+// 1. Define a public Enum that holds a type-erased Trait object.
+pub enum BackendRunner {
+    Tdm(Arc<dyn TdmBackend + Send + Sync + 'static>),
+    Concurrent(Arc<dyn ConcurrentBackend + Send + Sync + 'static>),
+}
 
-#[cfg(feature = "backend_wpa_cli_TDM")]
-pub async fn run_provisioning_server<F>(frontend: Arc<F>, backend: Arc<provisioner_core::backends::wpa_cli_TDM::WpaCliTdmBackend>) -> anyhow::Result<()>
+// 2. Remove all cfg blocks from runner.rs.
+//    `run_provisioning_server` now accepts the Enum.
+pub async fn run_provisioning_server<F>(
+    frontend: Arc<F>,
+    backend_runner: BackendRunner, // Accept the Enum
+) -> anyhow::Result<()>
 where
     F: UiAssetProvider + 'static,
 {
-    web_server::start_tdm_server(backend, frontend).await??;
+    match backend_runner {
+        BackendRunner::Tdm(backend) => {
+            println!("📡 Runner: Starting TDM server...");
+            web_server::start_tdm_server(backend, frontend).await??;
+        }
+        BackendRunner::Concurrent(backend) => {
+            println!("📡 Runner: Starting Concurrent server...");
+            web_server::start_concurrent_server(backend, frontend).await??;
+        }
+    }
     Ok(())
 }
-
-#[cfg(feature = "backend_networkmanager_TDM")]
-pub async fn run_provisioning_server<F>(frontend: Arc<F>, backend: Arc<provisioner_core::backends::networkmanager_TDM::NetworkManagerTdmBackend>) -> anyhow::Result<()>
-where
-    F: UiAssetProvider + 'static,
-{
-    web_server::start_tdm_server(backend, frontend).await??;
-    Ok(())
-}
-
-// WPA D-Bus backend support removed; keep implementations for remaining backends only.
-
-#[cfg(feature = "backend_mock")]
-pub async fn run_provisioning_server<F>(frontend: Arc<F>, backend: Arc<provisioner_core::backends::mock::MockBackend>) -> anyhow::Result<()>
-where
-    F: UiAssetProvider + 'static,
-{
-    web_server::start_concurrent_server(backend, frontend).await??;
-    Ok(())
-}
-
