@@ -30,3 +30,4 @@ backend_wpa_cli_exclusive = ["provisioner-core/backend_wpa_cli_exclusive"]
 backend_wpa_cli_TDM = ["provisioner-core/backend_wpa_cli_TDM"]
 
 ui_echo_mate = ["provisioner-core/ui_echo_mate"]
+ui_radxa_x4 = ["provisioner-core/ui_radxa_x4"]

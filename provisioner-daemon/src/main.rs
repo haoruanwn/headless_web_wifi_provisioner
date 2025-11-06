@@ -4,7 +4,7 @@ use std::sync::Arc;
 // 静态分发的前端工厂
 fn create_static_frontend() -> Arc<impl UiAssetProvider> {
     // 编译时验证：确保只选择一个 UI 主题
-    const UI_THEME_COUNT: usize = cfg!(feature = "ui_echo_mate") as usize;
+    const UI_THEME_COUNT: usize = cfg!(feature = "ui_echo_mate") as usize + cfg!(feature = "ui_radxa_x4") as usize;
     const _: () = assert!(UI_THEME_COUNT == 1, "Select exactly ONE UI theme.");
 
     #[cfg(feature = "backend_mock")]

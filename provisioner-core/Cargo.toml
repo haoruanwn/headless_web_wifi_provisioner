@@ -44,3 +44,4 @@ backend_mock = ["dep:tower-http"]                # Mock backend -> disk
 
 # === 2. UI 主题选择 ===
 ui_echo_mate = []
+ui_radxa_x4 = []

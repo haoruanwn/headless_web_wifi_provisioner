@@ -8,6 +8,8 @@
 
    ```bash
    cargo run --features "provisioner-daemon/backend_mock, provisioner-daemon/ui_echo_mate"
+
+   cargo run --features "provisioner-daemon/backend_mock, provisioner-daemon/ui_radxa_x4"
    ```
 
 2. 本地编译（systemd后端+echo-mate 主题）

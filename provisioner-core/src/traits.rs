@@ -12,11 +12,6 @@ pub struct Network {
     pub security: String, // e.g., "WPA2", "WEP", "Open"
 }
 
-// NOTE: Old `ProvisioningBackend` (dyn-based) removed.
-// We now use capability-based traits below: `ProvisioningTerminator`,
-// `ConcurrentBackend`, and `TdmBackend`.
-
-
 /// Defines the interface for providing UI assets.
 /// This trait abstracts the source of the UI files, allowing them
 /// to be loaded from disk (for debugging) or from an embedded resource
@@ -36,9 +31,6 @@ pub trait UiAssetProvider: Send + Sync {
 }
 
 // -----------------------------------------------------------------------------
-// 新增：按能力拆分的 trait（保持向后兼容）
-// -----------------------------------------------------------------------------
-
 /// 基础能力：终止/连接能力（所有后端都应提供）
 #[async_trait]
 pub trait ProvisioningTerminator: Send + Sync {
@@ -65,7 +57,3 @@ pub trait TdmBackend: ProvisioningTerminator {
     /// 进入配网模式并返回启动前的扫描列表
     async fn enter_provisioning_mode_with_scan(&self) -> crate::Result<Vec<Network>>;
 }
-
-// No compatibility blanket impls: we require explicit implementations
-// of `ConcurrentBackend` or `TdmBackend` for selected backends.
-

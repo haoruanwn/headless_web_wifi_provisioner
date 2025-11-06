@@ -19,8 +19,11 @@ impl DiskFrontend {
 impl UiAssetProvider for DiskFrontend {
     async fn get_asset(&self, path: &str) -> Result<(Cow<'static, [u8]>, String)> {
         // Select theme path at compile time based on features
-        #[cfg(feature = "ui_echo_mate")]
-        let theme_path = "ui/themes/echo-mate";
+    #[cfg(feature = "ui_echo_mate")]
+    let theme_path = "ui/themes/echo-mate";
+
+    #[cfg(feature = "ui_radxa_x4")]
+    let theme_path = "ui/themes/radxa_x4";
 
         // Sanitize the path to prevent directory traversal attacks
         let asset_path = PathBuf::from(theme_path).join(path);

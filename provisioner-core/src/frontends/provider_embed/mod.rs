@@ -10,6 +10,15 @@ use std::borrow::Cow;
 #[folder = "../ui/themes/echo-mate/"]
 struct Asset;
 
+#[cfg(feature = "ui_radxa_x4")]
+#[derive(RustEmbed)]
+#[folder = "../ui/themes/radxa_x4/"]
+struct AssetRadxa;
+
+// Provide a small shim so the rest of the code can use `Asset` name.
+#[cfg(feature = "ui_radxa_x4")]
+use AssetRadxa as Asset;
+
 /// A UI asset provider that serves files embedded into the binary.
 #[derive(Debug, Default)]
 pub struct EmbedFrontend;
