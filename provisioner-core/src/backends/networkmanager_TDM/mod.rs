@@ -51,7 +51,10 @@ impl NetworkManagerTdmBackend {
 
         if !output.status.success() {
             let err = String::from_utf8_lossy(&output.stderr);
-            return Err(Error::CommandFailed(format!("Failed to start hotspot via nmcli: {}", err)));
+            return Err(Error::CommandFailed(format!(
+                "Failed to start hotspot via nmcli: {}",
+                err
+            )));
         }
 
         // Find the active wifi connection name for this device
@@ -87,8 +90,18 @@ impl NetworkManagerTdmBackend {
     /// Stop the hotspot managed by NetworkManager (best-effort).
     async fn stop_ap(&self) -> Result<()> {
         if let Some(name) = self.hotspot_name.lock().await.take() {
-            let _ = Command::new("nmcli").arg("connection").arg("down").arg(&name).output().await;
-            let _ = Command::new("nmcli").arg("connection").arg("delete").arg(&name).output().await;
+            let _ = Command::new("nmcli")
+                .arg("connection")
+                .arg("down")
+                .arg(&name)
+                .output()
+                .await;
+            let _ = Command::new("nmcli")
+                .arg("connection")
+                .arg("delete")
+                .arg(&name)
+                .output()
+                .await;
         } else {
             // fallback: try to bring down any active wifi connection on IFACE_NAME
             let list = Command::new("nmcli")
@@ -109,7 +122,12 @@ impl NetworkManagerTdmBackend {
                         let device = parts[1];
                         let typ = parts[2];
                         if device == IFACE_NAME && typ.to_lowercase().contains("wifi") {
-                            let _ = Command::new("nmcli").arg("connection").arg("down").arg(name).output().await;
+                            let _ = Command::new("nmcli")
+                                .arg("connection")
+                                .arg("down")
+                                .arg(name)
+                                .output()
+                                .await;
                         }
                     }
                 }
@@ -123,22 +141,41 @@ impl NetworkManagerTdmBackend {
         // `nmcli -t -f SSID,SIGNAL,SECURITY device wifi list` yields colon-separated lines
         let mut networks = Vec::new();
         for line in output.lines() {
-            if line.trim().is_empty() { continue; }
+            if line.trim().is_empty() {
+                continue;
+            }
             // split into at most 3 fields
             let parts: Vec<&str> = line.split(':').collect();
             let ssid = parts.get(0).map(|s| s.to_string()).unwrap_or_default();
-            if ssid.is_empty() || ssid == "\\x00" { continue; }
-            let signal = parts.get(1).and_then(|s| s.parse::<i16>().ok()).unwrap_or(0);
-            let security = parts.get(2).map(|s| s.to_string()).unwrap_or_else(|| "Unknown".to_string());
+            if ssid.is_empty() || ssid == "\\x00" {
+                continue;
+            }
+            let signal = parts
+                .get(1)
+                .and_then(|s| s.parse::<i16>().ok())
+                .unwrap_or(0);
+            let security = parts
+                .get(2)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "Unknown".to_string());
             let signal_percent = ((signal.clamp(-100, -50) + 100) * 2) as u8;
-            networks.push(Network { ssid, signal: signal_percent, security });
+            networks.push(Network {
+                ssid,
+                signal: signal_percent,
+                security,
+            });
         }
         networks
     }
 
     async fn scan_internal(&self) -> Result<Vec<Network>> {
         // ask NetworkManager to rescan
-        let _ = Command::new("nmcli").arg("device").arg("wifi").arg("rescan").output().await;
+        let _ = Command::new("nmcli")
+            .arg("device")
+            .arg("wifi")
+            .arg("rescan")
+            .output()
+            .await;
         let output = Command::new("nmcli")
             .arg("-t")
             .arg("-f")
@@ -160,7 +197,14 @@ impl NetworkManagerTdmBackend {
 
     // Check whether NetworkManager reports a connected state.
     pub async fn check_connected_nmcli() -> Result<bool> {
-        match Command::new("nmcli").arg("-t").arg("-f").arg("STATE").arg("general").output().await {
+        match Command::new("nmcli")
+            .arg("-t")
+            .arg("-f")
+            .arg("STATE")
+            .arg("general")
+            .output()
+            .await
+        {
             Ok(out) => {
                 if !out.status.success() {
                     return Ok(false);
@@ -178,7 +222,9 @@ impl NetworkManagerTdmBackend {
         // Ensure NetworkManager is running is out of scope; we rely on nmcli availability.
         let networks = self.scan_internal().await?;
         if networks.is_empty() {
-            return Err(Error::CommandFailed("Initial scan returned no networks".into()));
+            return Err(Error::CommandFailed(
+                "Initial scan returned no networks".into(),
+            ));
         }
         *self.last_scan.lock().await = Some(networks.clone());
         // start AP
@@ -190,25 +236,45 @@ impl NetworkManagerTdmBackend {
         // Try to use nmcli to connect
         // For protected networks provide password, otherwise set open
         if password.is_empty() {
-            let _ = Command::new("nmcli").arg("device").arg("wifi").arg("connect").arg(ssid).output().await;
+            let _ = Command::new("nmcli")
+                .arg("device")
+                .arg("wifi")
+                .arg("connect")
+                .arg(ssid)
+                .output()
+                .await;
         } else {
-            let _ = Command::new("nmcli").arg("device").arg("wifi").arg("connect").arg(ssid).arg("password").arg(password).output().await;
+            let _ = Command::new("nmcli")
+                .arg("device")
+                .arg("wifi")
+                .arg("connect")
+                .arg(ssid)
+                .arg("password")
+                .arg(password)
+                .output()
+                .await;
         }
         // Best-effort: check connection state
         for _ in 0..15 {
-            if let Ok(true) = Self::check_connected_nmcli().await { return Ok(()); }
+            if let Ok(true) = Self::check_connected_nmcli().await {
+                return Ok(());
+            }
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         }
         // if failed, restore AP
         let _ = self.start_ap().await;
-        Err(Error::CommandFailed("Connection timed out or failed".into()))
+        Err(Error::CommandFailed(
+            "Connection timed out or failed".into(),
+        ))
     }
 
     async fn enter_provisioning_mode_impl(&self) -> Result<()> {
         // Similar to WpaCli: scan then start AP
         let networks = self.scan_internal().await?;
         if networks.is_empty() {
-            return Err(Error::CommandFailed("Initial scan returned no networks".into()));
+            return Err(Error::CommandFailed(
+                "Initial scan returned no networks".into(),
+            ));
         }
         *self.last_scan.lock().await = Some(networks);
         self.start_ap().await?;
@@ -216,7 +282,9 @@ impl NetworkManagerTdmBackend {
     }
 
     pub async fn scan_impl(&self) -> Result<Vec<Network>> {
-        if let Some(vec) = &*self.last_scan.lock().await { return Ok(vec.clone()); }
+        if let Some(vec) = &*self.last_scan.lock().await {
+            return Ok(vec.clone());
+        }
         let networks = self.scan_internal().await?;
         *self.last_scan.lock().await = Some(networks.clone());
         Ok(networks)
@@ -227,7 +295,14 @@ impl NetworkManagerTdmBackend {
 impl ProvisioningTerminator for NetworkManagerTdmBackend {
     async fn is_connected(&self) -> Result<bool> {
         // Use `nmcli -t -f STATE general` which usually prints e.g. "connected" or "disconnected"
-        match Command::new("nmcli").arg("-t").arg("-f").arg("STATE").arg("general").output().await {
+        match Command::new("nmcli")
+            .arg("-t")
+            .arg("-f")
+            .arg("STATE")
+            .arg("general")
+            .output()
+            .await
+        {
             Ok(out) => {
                 if !out.status.success() {
                     return Ok(false);

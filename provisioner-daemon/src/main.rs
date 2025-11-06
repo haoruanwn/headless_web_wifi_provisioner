@@ -32,14 +32,10 @@ async fn main() -> anyhow::Result<()> {
     let frontend = create_static_frontend();
 
     // --- Create backend early and inject into policy ---
-    // 编译时验证：确保只选择一个后端
+    // 编译时验证：确保只选择一个后端（保留的后端：mock / wpa_cli_TDM / networkmanager_TDM）
     const BACKEND_COUNT: usize = cfg!(feature = "backend_mock") as usize
-        + cfg!(feature = "backend_wpa_dbus") as usize
-        + cfg!(feature = "backend_wpa_cli") as usize
-        + cfg!(feature = "backend_wpa_cli_exclusive") as usize
         + cfg!(feature = "backend_wpa_cli_TDM") as usize
-        + cfg!(feature = "backend_networkmanager_TDM") as usize
-        + cfg!(feature = "backend_systemd") as usize;
+        + cfg!(feature = "backend_networkmanager_TDM") as usize;
     const _: () = assert!(BACKEND_COUNT == 1, "Select exactly ONE backend.");
     let _ = BACKEND_COUNT;
 
@@ -59,14 +55,7 @@ async fn main() -> anyhow::Result<()> {
         policy::dispatch(frontend, backend).await?;
     }
 
-    #[cfg(feature = "backend_wpa_dbus")]
-    {
-        println!("📡 Backend: WPA Supplicant D-Bus (Static Dispatch)");
-        let backend = Arc::new(
-            provisioner_core::backends::wpa_supplicant_dbus::DbusBackend::new().await?,
-        );
-        policy::dispatch(frontend, backend).await?;
-    }
+    // Note: the WPA D-Bus backend was removed from the supported feature set.
 
     #[cfg(feature = "backend_mock")]
     {

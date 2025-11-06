@@ -52,28 +52,7 @@ where
     Ok(())
 }
 
-#[cfg(feature = "backend_wpa_dbus")]
-pub async fn dispatch<F>(frontend: Arc<F>, backend: Arc<provisioner_core::backends::wpa_supplicant_dbus::DbusBackend>) -> anyhow::Result<()>
-where
-    F: UiAssetProvider + 'static,
-{
-    const POLICY_COUNT: usize = cfg!(feature = "policy_on_start") as usize
-        + cfg!(feature = "policy_daemon_if_disconnected") as usize;
-    const _: () = assert!(POLICY_COUNT == 1, "Select exactly ONE policy feature (e.g., policy_on_start).");
-    let _ = POLICY_COUNT;
-
-    #[cfg(feature = "policy_on_start")]
-    {
-        on_start::run(frontend.clone(), backend.clone()).await?;
-    }
-
-    #[cfg(feature = "policy_daemon_if_disconnected")]
-    {
-        daemon_if_disconnected::run(frontend, backend).await?;
-    }
-
-    Ok(())
-}
+// NOTE: backend_wpa_dbus dispatch specialization removed with that feature.
 
 #[cfg(feature = "backend_mock")]
 pub async fn dispatch<F>(frontend: Arc<F>, backend: Arc<provisioner_core::backends::mock::MockBackend>) -> anyhow::Result<()>

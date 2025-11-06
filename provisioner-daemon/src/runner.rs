@@ -21,14 +21,7 @@ where
     Ok(())
 }
 
-#[cfg(feature = "backend_wpa_dbus")]
-pub async fn run_provisioning_server<F>(frontend: Arc<F>, backend: Arc<provisioner_core::backends::wpa_supplicant_dbus::DbusBackend>) -> anyhow::Result<()>
-where
-    F: UiAssetProvider + 'static,
-{
-    web_server::start_concurrent_server(backend, frontend).await??;
-    Ok(())
-}
+// WPA D-Bus backend support removed; keep implementations for remaining backends only.
 
 #[cfg(feature = "backend_mock")]
 pub async fn run_provisioning_server<F>(frontend: Arc<F>, backend: Arc<provisioner_core::backends::mock::MockBackend>) -> anyhow::Result<()>

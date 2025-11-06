@@ -34,14 +34,11 @@ mime_guess = { workspace = true }
 # 默认特性为空
 default = []
 
-# === 1. 后端实现选择 (隐式决定交付方式) ===
-backend_wpa_dbus = ["zbus", "zbus_macros", "futures-util", "libc"] # Real backend -> embed
-backend_systemd = []             # Real backend -> embed (uses always-present deps)
-backend_wpa_cli = []               # Real backend -> embed (uses wpa_cli and dnsmasq)
-backend_wpa_cli_exclusive = []   # Real backend -> embed (uses wpa_cli, hostapd and dnsmasq)
-backend_wpa_cli_TDM = []  # Real backend -> embed (TDM: 时分复用使用 wpa_cli)
-backend_mock = ["dep:tower-http"]                # Mock backend -> disk
-backend_networkmanager_TDM = [] # Time-multiplexed NetworkManager backend using nmcli
+# === 1. 后端实现选择 (仅保留三个后端) ===
+# 保留：wpa_cli_TDM (时分复用)、networkmanager_TDM、mock
+backend_wpa_cli_TDM = []
+backend_mock = ["dep:tower-http"]
+backend_networkmanager_TDM = []
 
 # === 2. UI 主题选择 ===
 ui_echo_mate = []

@@ -21,13 +21,7 @@ pub enum Error {
     #[error("Command failed: {0}")]
     CommandFailed(String),
 
-    #[cfg(feature = "backend_wpa_dbus")]
-    #[error("D-Bus error: {0}")]
-    Dbus(#[from] zbus::Error),
-
-    #[cfg(feature = "backend_wpa_dbus")]
-    #[error("zvariant error: {0}")]
-    Zvariant(#[from] zbus::zvariant::Error),
+    // WPA D-Bus backend related errors removed when backend_wpa_dbus feature was dropped.
 
     #[error("Web server error: {0}")]
     WebServer(#[from] axum::BoxError),
