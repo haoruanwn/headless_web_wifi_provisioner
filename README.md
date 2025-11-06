@@ -26,8 +26,8 @@
     # 使用 networkmanager 后端并立即进入配网
     cargo build --features "\
        provisioner-daemon/backend_networkmanager_TDM \
-       provisioner-daemon/ui_echo_mate \
-       provisioner-daemon/policy_on_start"
+       provisioner-daemon/ui_radxa_x4 \
+       provisioner-daemon/policy_on_start" --release
 
     # 编译 TDM 后端（示例）
     cargo build --features "\
@@ -71,3 +71,4 @@ cross build \
 export RUST_LOG="debug,tower_http=debug"
 ```
 
+rsync -avz --delete target/release/ archlinux:/home/hao/provisioner/
