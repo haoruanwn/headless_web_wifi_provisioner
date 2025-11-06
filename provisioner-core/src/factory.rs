@@ -6,6 +6,8 @@ pub fn create_frontend() -> Arc<dyn UiAssetProvider> {
     const UI_THEME_COUNT: usize = cfg!(feature = "ui_echo_mate") as usize
         + cfg!(feature = "ui_radxa_x4") as usize;
     const _: () = assert!(UI_THEME_COUNT == 1, "Please select exactly ONE UI theme feature (e.g. ui_echo_mate or ui_radxa_x4). Please enable exactly one.");
+    // Make the const 'used' in all cfg permutations to avoid dead_code warnings
+    let _ = UI_THEME_COUNT;
 
     // Disk provider for local development (mock)
     #[cfg(feature = "backend_mock")]
