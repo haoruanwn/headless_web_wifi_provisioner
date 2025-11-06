@@ -1,91 +1,67 @@
-use provisioner_core::web_server;
+use provisioner_core::{web_server, traits::UiAssetProvider};
 use std::sync::Arc;
+
+// 静态分发的前端工厂
+fn create_static_frontend() -> Arc<impl UiAssetProvider> {
+    // 编译时验证：确保只选择一个 UI 主题
+    const UI_THEME_COUNT: usize = cfg!(feature = "ui_echo_mate") as usize;
+    const _: () = assert!(UI_THEME_COUNT == 1, "Select exactly ONE UI theme.");
+
+    #[cfg(feature = "backend_mock")]
+    {
+        println!("💿 Frontend: Disk Provider selected (Static Dispatch)");
+        Arc::new(provisioner_core::frontends::provider_disk::DiskFrontend::new())
+    }
+    #[cfg(not(feature = "backend_mock"))]
+    {
+        println!("📦 Frontend: Embed Provider selected (Static Dispatch)");
+        Arc::new(provisioner_core::frontends::provider_embed::EmbedFrontend::new())
+    }
+}
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // Initialize logging
     tracing_subscriber::fmt::init();
-
     println!("🚀 Starting provisioner-daemon...");
 
-    // --- Compile-time validation to ensure exactly one backend is selected ---
+    // 编译时验证：确保只选择一个后端
     const BACKEND_COUNT: usize = cfg!(feature = "backend_mock") as usize
         + cfg!(feature = "backend_wpa_dbus") as usize
         + cfg!(feature = "backend_wpa_cli") as usize
         + cfg!(feature = "backend_wpa_cli_exclusive") as usize
         + cfg!(feature = "backend_wpa_cli_TDM") as usize
         + cfg!(feature = "backend_systemd") as usize;
-    const _: () = assert!(
-        BACKEND_COUNT == 1,
-        "Please select exactly ONE backend feature."
-    );
+    const _: () = assert!(BACKEND_COUNT == 1, "Select exactly ONE backend.");
 
-    // --- Compile-time validation to ensure exactly one UI theme is selected ---
-    const UI_THEME_COUNT: usize = cfg!(feature = "ui_echo_mate") as usize;
-    const _: () = assert!(
-        UI_THEME_COUNT == 1,
-        "Please select exactly ONE UI theme feature: ui_echo_mate."
-    );
+    let frontend = create_static_frontend();
 
-    // --- Runtime instantiation based on the selected features ---
-
-    #[cfg(feature = "backend_mock")]
-    let backend: Arc<dyn provisioner_core::traits::ProvisioningBackend> = {
-        println!("🔧 Backend: MockBackend selected");
-        Arc::new(provisioner_core::backends::mock::MockBackend::new())
-    };
-    #[cfg(feature = "backend_wpa_dbus")]
-    let backend: Arc<dyn provisioner_core::traits::ProvisioningBackend> = {
-        println!("📡 Backend: WPA Supplicant (D-Bus) selected");
-        Arc::new(provisioner_core::backends::wpa_supplicant_dbus::DbusBackend::new().await?)
-    };
-    #[cfg(feature = "backend_systemd")]
-    let backend: Arc<dyn provisioner_core::traits::ProvisioningBackend> = {
-        println!("🐧 Backend: Systemd Networkd selected");
-        Arc::new(provisioner_core::backends::systemd_networkd::SystemdNetworkdBackend::new())
-    };
-    #[cfg(feature = "backend_wpa_cli")]
-    let backend: Arc<dyn provisioner_core::traits::ProvisioningBackend> = {
-        println!("CLI Backend: WPA CLI + Dnsmasq selected");
-        Arc::new(provisioner_core::backends::wpa_cli_dnsmasq::WpaCliDnsmasqBackend::new()?)
-    };
-
-    #[cfg(feature = "backend_wpa_cli_exclusive")]
-    let backend: Arc<dyn provisioner_core::traits::ProvisioningBackend> = {
-        println!("CLI Backend: WPA CLI Exclusive selected");
-        Arc::new(provisioner_core::backends::wpa_cli_exclusive::WpaCliExclusiveBackend::new()?)
-    };
+    // --- Branch: TDM backend ---
     #[cfg(feature = "backend_wpa_cli_TDM")]
-    let backend: Arc<dyn provisioner_core::traits::ProvisioningBackend> = {
-        println!("CLI Backend: WPA CLI TDM selected");
-        Arc::new(provisioner_core::backends::wpa_cli_TDM::WpaCliTdmBackend::new()?)
-    };
-    // Frontend provider is now chosen IMPLICITLY based on the backend selection.
-    let frontend: Arc<dyn provisioner_core::traits::UiAssetProvider> = {
-        // If mock backend is used, it implies local development. Use the Disk provider.
-        #[cfg(feature = "backend_mock")]
-        {
-            println!("💿 Frontend: Disk Provider selected (for local development)");
-            Arc::new(provisioner_core::frontends::provider_disk::DiskFrontend::new())
-        }
-        // If any real backend is used, it implies a release build. Use the Embed provider.
-        #[cfg(not(feature = "backend_mock"))]
-        {
-            println!("📦 Frontend: Embed Provider selected (for deployment)");
-            Arc::new(provisioner_core::frontends::provider_embed::EmbedFrontend::new())
-        }
-    };
+    {
+        println!("📡 Backend: WPA CLI TDM (Static Dispatch)");
+        let backend = Arc::new(
+            provisioner_core::backends::wpa_cli_TDM::WpaCliTdmBackend::new()?
+        );
+        web_server::start_tdm_server(backend, frontend).await??;
+    }
 
-    // --- Setup Provisioning Mode ---
-    println!("Setting up provisioning mode...");
-    backend.enter_provisioning_mode().await?;
-    println!("Provisioning mode setup complete.");
+    // --- Branch: D-Bus (concurrent) ---
+    #[cfg(feature = "backend_wpa_dbus")]
+    {
+        println!("📡 Backend: WPA Supplicant D-Bus (Static Dispatch)");
+        let backend = Arc::new(
+            provisioner_core::backends::wpa_supplicant_dbus::DbusBackend::new().await?
+        );
+        web_server::start_concurrent_server(backend, frontend).await??;
+    }
 
-    // --- Start the Web Server ---
-    let web_server_handle = web_server::start_web_server(backend, frontend);
-
-    // Run the web server
-    web_server_handle.await??;
+    // --- Branch: Mock (concurrent) ---
+    #[cfg(feature = "backend_mock")]
+    {
+        println!("🔧 Backend: MockBackend (Static Dispatch)");
+        let backend = Arc::new(provisioner_core::backends::mock::MockBackend::new());
+        web_server::start_concurrent_server(backend, frontend).await??;
+    }
 
     Ok(())
 }

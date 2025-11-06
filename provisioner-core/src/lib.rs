@@ -7,10 +7,12 @@ pub mod traits;
 pub mod backends;
 pub mod frontends;
 pub mod web_server;
+pub mod factory;
 
 // Define a shared Error and Result type for the entire crate.
 
 use thiserror::Error;
+use factory::{create_backend, create_frontend};
 
 #[derive(Debug, Error)]
 pub enum Error {

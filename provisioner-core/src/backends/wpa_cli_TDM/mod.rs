@@ -1,7 +1,7 @@
 // 后端：wpa_cli_TDM（时分复用调用 wpa_cli）
 // 基于之前的 wpa_cli_exclusive2 实现做了重命名并修复了 dnsmasq --address 参数。
 
-use crate::traits::{Network, ProvisioningBackend};
+use crate::traits::{Network, ProvisioningBackend, TdmBackend};
 use crate::{Error, Result};
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -13,9 +13,10 @@ const AP_IP_ADDR: &str = "192.168.4.1/24";
 
 #[derive(Debug)]
 pub struct WpaCliTdmBackend {
+    // 控制 hostapd 进程的句柄
     hostapd: Arc<Mutex<Option<Child>>> ,
     dnsmasq: Arc<Mutex<Option<Child>>> ,
-    /// 上一次扫描结果（应用启动时会先执行一次扫描并保存）
+    // 上一次扫描结果（应用启动时会先执行一次扫描并保存）
     last_scan: Arc<Mutex<Option<Vec<Network>>>>,
 }
 
@@ -395,5 +396,18 @@ impl ProvisioningBackend for WpaCliTdmBackend {
         let _ = self.start_ap().await;
 
         Err(Error::CommandFailed("Connection timed out".into()))
+    }
+}
+
+#[async_trait]
+impl TdmBackend for WpaCliTdmBackend {
+    async fn enter_provisioning_mode_with_scan(&self) -> Result<Vec<Network>> {
+        // reuse existing initialization that performs an initial scan and starts AP
+        ProvisioningBackend::enter_provisioning_mode(self).await?;
+        if let Some(vec) = &*self.last_scan.lock().await {
+            Ok(vec.clone())
+        } else {
+            Err(Error::CommandFailed("Initial scan yielded no networks".into()))
+        }
     }
 }

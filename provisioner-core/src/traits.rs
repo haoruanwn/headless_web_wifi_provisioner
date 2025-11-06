@@ -67,3 +67,69 @@ pub trait UiAssetProvider: Send + Sync {
     /// 获取单个 UI 资源。
     async fn get_asset(&self, path: &str) -> crate::Result<(Cow<'static, [u8]>, String)>;
 }
+
+// -----------------------------------------------------------------------------
+// 新增：按能力拆分的 trait（保持向后兼容）
+// -----------------------------------------------------------------------------
+
+/// 基础能力：终止/连接能力（所有后端都应提供）
+#[async_trait]
+pub trait ProvisioningTerminator: Send + Sync {
+    /// 尝试连接（这是一个终止操作）
+    async fn connect(&self, ssid: &str, password: &str) -> crate::Result<()>;
+
+    /// 彻底退出配网模式（清理 AP）
+    async fn exit_provisioning_mode(&self) -> crate::Result<()>;
+}
+
+/// 并发后端能力：支持实时扫描 + 启动 AP
+#[async_trait]
+pub trait ConcurrentBackend: ProvisioningTerminator {
+    /// 进入配网模式（仅启动 AP）
+    async fn enter_provisioning_mode(&self) -> crate::Result<()>;
+
+    /// 执行一次实时的 Wi-Fi 扫描
+    async fn scan(&self) -> crate::Result<Vec<Network>>;
+}
+
+/// TDM（时分复用）后端能力：启动时先扫描然后启动 AP，返回启动时的扫描列表
+#[async_trait]
+pub trait TdmBackend: ProvisioningTerminator {
+    /// 进入配网模式并返回启动前的扫描列表
+    async fn enter_provisioning_mode_with_scan(&self) -> crate::Result<Vec<Network>>;
+}
+
+// -----------------------------------------------------------------------------
+// 兼容层：对于仍然实现了旧的 `ProvisioningBackend` 的后端，
+// 自动为它们提供 `ProvisioningTerminator` / `ConcurrentBackend` 的实现，
+// 这样可以在逐步迁移时保持向后兼容。
+// -----------------------------------------------------------------------------
+
+#[async_trait]
+impl<T> ProvisioningTerminator for T
+where
+    T: ProvisioningBackend + Send + Sync,
+{
+    async fn connect(&self, ssid: &str, password: &str) -> crate::Result<()> {
+        ProvisioningBackend::connect(self, ssid, password).await
+    }
+
+    async fn exit_provisioning_mode(&self) -> crate::Result<()> {
+        ProvisioningBackend::exit_provisioning_mode(self).await
+    }
+}
+
+#[async_trait]
+impl<T> ConcurrentBackend for T
+where
+    T: ProvisioningBackend + Send + Sync,
+{
+    async fn enter_provisioning_mode(&self) -> crate::Result<()> {
+        ProvisioningBackend::enter_provisioning_mode(self).await
+    }
+
+    async fn scan(&self) -> crate::Result<Vec<Network>> {
+        ProvisioningBackend::scan(self).await
+    }
+}
+
