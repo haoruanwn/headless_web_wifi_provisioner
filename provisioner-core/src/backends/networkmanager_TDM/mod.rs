@@ -31,61 +31,68 @@ impl NetworkManagerTdmBackend {
         })
     }
 
-    /// Start an AP using NetworkManager's nmcli hotspot command and remember the
-    /// active connection name. Best-effort: if nmcli device wifi hotspot is
-    /// unavailable, return an error.
+    /// 启动 AP（使用 `connection add` 以便指定 IP）
     async fn start_ap(&self) -> Result<()> {
-        // create a hotspot using NetworkManager
-        let output = Command::new("nmcli")
-            .arg("device")
+        // 这个名称与 `stop_ap` 中要删除的名称一致
+        const AP_CONNECTION_NAME: &str = "ProvisionerAP";
+
+        // 1. 尝试添加一个新连接配置
+        //    这与 AP配网模式.md 中的逻辑相同
+        let add_output = Command::new("nmcli")
+            .arg("connection")
+            .arg("add")
+            .arg("type")
             .arg("wifi")
-            .arg("hotspot")
             .arg("ifname")
             .arg(IFACE_NAME)
+            .arg("con-name")
+            .arg(AP_CONNECTION_NAME)
+            .arg("autoconnect")
+            .arg("no")
             .arg("ssid")
-            .arg(PROV_SSID)
-            .arg("password")
-            .arg(PROV_PSK)
-            // Force nmcli to use the IP address expected by the web_server
+            .arg(PROV_SSID) // PROV_SSID 已定义为 "ProvisionerAP"
+            .arg("802-11-wireless.mode")
+            .arg("ap")
+            .arg("ipv4.method")
+            .arg("shared")
             .arg("ipv4.addresses")
-            .arg(AP_IP_ADDR)
+            .arg(AP_IP_ADDR) // AP_IP_ADDR 已定义为 192.168.4.1/24
+            .arg("wifi-sec.key-mgmt")
+            .arg("wpa-psk")
+            .arg("wifi-sec.psk")
+            .arg(PROV_PSK) // PROV_PSK 已定义为 "provisioner123"
             .output()
             .await?;
 
-        if !output.status.success() {
-            let err = String::from_utf8_lossy(&output.stderr);
+        if !add_output.status.success() {
+            let err = String::from_utf8_lossy(&add_output.stderr);
+            // 如果连接已存在（例如上次程序崩溃未清理），也算成功
+            if !err.contains("connection profile") || !err.contains("already exists") {
+                return Err(Error::CommandFailed(format!(
+                    "Failed to add hotspot connection: {}",
+                    err
+                )));
+            }
+        }
+
+        // 2. 激活这个连接
+        let up_output = Command::new("nmcli")
+            .arg("connection")
+            .arg("up")
+            .arg(AP_CONNECTION_NAME)
+            .output()
+            .await?;
+
+        if !up_output.status.success() {
+            let err = String::from_utf8_lossy(&up_output.stderr);
             return Err(Error::CommandFailed(format!(
-                "Failed to start hotspot via nmcli: {}",
+                "Failed to bring up hotspot connection: {}",
                 err
             )));
         }
 
-        // Find the active wifi connection name for this device
-        let list = Command::new("nmcli")
-            .arg("-t")
-            .arg("-f")
-            .arg("NAME,DEVICE,TYPE")
-            .arg("connection")
-            .arg("show")
-            .arg("--active")
-            .output()
-            .await?;
-
-        if list.status.success() {
-            let txt = String::from_utf8_lossy(&list.stdout);
-            for line in txt.lines() {
-                let parts: Vec<&str> = line.split(':').collect();
-                if parts.len() >= 3 {
-                    let name = parts[0];
-                    let device = parts[1];
-                    let typ = parts[2];
-                    if device == IFACE_NAME && typ.to_lowercase().contains("wifi") {
-                        *self.hotspot_name.lock().await = Some(name.to_string());
-                        break;
-                    }
-                }
-            }
-        }
+        // 3. 存储我们创建的连接名称，以便 stop_ap 可以清理它
+        *self.hotspot_name.lock().await = Some(AP_CONNECTION_NAME.to_string());
 
         Ok(())
     }
