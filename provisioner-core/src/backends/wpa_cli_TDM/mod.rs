@@ -401,6 +401,33 @@ impl WpaCliTdmBackend {
 
 #[async_trait]
 impl ProvisioningTerminator for WpaCliTdmBackend {
+    async fn is_connected(&self) -> Result<bool> {
+        println!("📡 [WpaCliTDM] Checking connection status via wpa_cli...");
+        let output = Command::new("wpa_cli")
+            .arg("-i")
+            .arg(IFACE_NAME)
+            .arg("status")
+            .output()
+            .await;
+
+        match output {
+            Ok(output) => {
+                if !output.status.success() {
+                    return Ok(false);
+                }
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                if stdout.contains("wpa_state=COMPLETED") && stdout.contains("ip_address=") {
+                    Ok(true)
+                } else {
+                    Ok(false)
+                }
+            }
+            Err(e) => {
+                tracing::warn!("wpa_cli status failed: {}", e);
+                Ok(false)
+            }
+        }
+    }
     async fn connect(&self, ssid: &str, password: &str) -> Result<()> {
         self.connect_impl(ssid, password).await
     }

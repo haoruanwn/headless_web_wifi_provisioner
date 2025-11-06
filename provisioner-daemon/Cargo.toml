@@ -6,21 +6,14 @@ edition.workspace = true
 [dependencies]
 anyhow = "1.0"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-# 启动器运行时
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "process"] }
 
-#
-# === 关键的结合点 ===
-#
-# 1. 我们依赖本地的 `provisioner-core` Crate
+# 依赖本地的 `provisioner-core` Crate
 provisioner-core = { path = "../provisioner-core", default-features = false }
 
 
 [features]
-# 我们定义自己的特性，然后"转发" (forward) 给 core Crate。
-# 这让我们可以从顶层控制所有编译。
-
-# 我们定义自己的特性，然后"转发" (forward) 给 core Crate。
+# 定义自己的特性，然后"转发" 给 core Crate。
 # 这让我们可以从顶层通过 `provisioner-daemon/<feature>` 来控制所有编译。
 backend_wpa_dbus = ["provisioner-core/backend_wpa_dbus"]
 backend_systemd = ["provisioner-core/backend_systemd"]
@@ -28,7 +21,10 @@ backend_mock = ["provisioner-core/backend_mock"]
 backend_wpa_cli = ["provisioner-core/backend_wpa_cli"]
 backend_wpa_cli_exclusive = ["provisioner-core/backend_wpa_cli_exclusive"]
 backend_wpa_cli_TDM = ["provisioner-core/backend_wpa_cli_TDM"]
+backend_networkmanager_TDM = ["provisioner-core/backend_networkmanager_TDM"]
 
+
+# 前端界面
 ui_echo_mate = ["provisioner-core/ui_echo_mate"]
 ui_radxa_x4 = ["provisioner-core/ui_radxa_x4"]
 

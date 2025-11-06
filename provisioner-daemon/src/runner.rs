@@ -9,6 +9,7 @@ pub async fn run_provisioning_server(frontend: Arc<impl UiAssetProvider + 'stati
         + cfg!(feature = "backend_wpa_cli") as usize
         + cfg!(feature = "backend_wpa_cli_exclusive") as usize
         + cfg!(feature = "backend_wpa_cli_TDM") as usize
+        + cfg!(feature = "backend_networkmanager_TDM") as usize
         + cfg!(feature = "backend_systemd") as usize;
     const _: () = assert!(BACKEND_COUNT == 1, "Select exactly ONE backend.");
     // reference to silence dead_code when cfg branches return early
@@ -19,6 +20,16 @@ pub async fn run_provisioning_server(frontend: Arc<impl UiAssetProvider + 'stati
     {
         println!("📡 Backend: WPA CLI TDM (Static Dispatch)");
         let backend = std::sync::Arc::new(provisioner_core::backends::wpa_cli_TDM::WpaCliTdmBackend::new()?);
+        web_server::start_tdm_server(backend, frontend).await??;
+    }
+
+    // --- Branch: NetworkManager TDM backend ---
+    #[cfg(feature = "backend_networkmanager_TDM")]
+    {
+        println!("📡 Backend: NetworkManager TDM (Static Dispatch)");
+        let backend = std::sync::Arc::new(
+            provisioner_core::backends::networkmanager_TDM::NetworkManagerTdmBackend::new()?
+        );
         web_server::start_tdm_server(backend, frontend).await??;
     }
 

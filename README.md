@@ -23,9 +23,9 @@
 2. 本地编译（systemd后端+echo-mate 主题）
 
     ```bash
-    # 使用 systemd 后端并立即进入配网
+    # 使用 networkmanager 后端并立即进入配网
     cargo run --features "\
-       provisioner-daemon/backend_systemd \
+       provisioner-daemon/backend_networkmanager_TDM \
        provisioner-daemon/ui_echo_mate \
        provisioner-daemon/policy_on_start"
 
@@ -33,6 +33,11 @@
     cargo build --features "\
        provisioner-daemon/backend_wpa_cli_TDM \
        provisioner-daemon/ui_echo_mate"
+
+    cargo build --features "\
+       provisioner-daemon/backend_networkmanager_TDM \
+       provisioner-daemon/ui_echo_mate \
+       provisioner-daemon/policy_daemon_if_disconnected"
     ```
 
 3. 交叉编译（使用于buildroot的wpa_cli后端+ echo-mate 主题）

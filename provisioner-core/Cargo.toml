@@ -41,6 +41,7 @@ backend_wpa_cli = []               # Real backend -> embed (uses wpa_cli and dns
 backend_wpa_cli_exclusive = []   # Real backend -> embed (uses wpa_cli, hostapd and dnsmasq)
 backend_wpa_cli_TDM = []  # Real backend -> embed (TDM: 时分复用使用 wpa_cli)
 backend_mock = ["dep:tower-http"]                # Mock backend -> disk
+backend_networkmanager_TDM = [] # Time-multiplexed NetworkManager backend using nmcli
 
 # === 2. UI 主题选择 ===
 ui_echo_mate = []

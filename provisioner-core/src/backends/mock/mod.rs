@@ -63,6 +63,10 @@ impl ConcurrentBackend for MockBackend {
 
 #[async_trait]
 impl ProvisioningTerminator for MockBackend {
+    async fn is_connected(&self) -> crate::Result<bool> {
+        println!("👻 [MockBackend] Checking connection status (simulated, returning false)");
+        Ok(false)
+    }
     async fn connect(&self, ssid: &str, password: &str) -> Result<()> {
         println!(
             "🤖 [MockBackend] Attempting to connect to SSID: '{}' with password: '{}'",

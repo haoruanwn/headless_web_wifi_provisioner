@@ -34,6 +34,8 @@ pub trait UiAssetProvider: Send + Sync {
 /// 基础能力：终止/连接能力（所有后端都应提供）
 #[async_trait]
 pub trait ProvisioningTerminator: Send + Sync {
+    /// [新增] 检查设备当前是否已连接到网络
+    async fn is_connected(&self) -> crate::Result<bool>;
     /// 尝试连接（这是一个终止操作）
     async fn connect(&self, ssid: &str, password: &str) -> crate::Result<()>;
 

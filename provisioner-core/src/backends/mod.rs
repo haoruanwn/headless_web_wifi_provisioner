@@ -20,3 +20,6 @@ pub mod wpa_cli_exclusive;
 
 #[cfg(feature = "backend_wpa_cli_TDM")]
 pub mod wpa_cli_TDM;
+
+#[cfg(feature = "backend_networkmanager_TDM")]
+pub mod networkmanager_TDM;
