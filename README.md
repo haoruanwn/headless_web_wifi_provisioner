@@ -11,7 +11,7 @@
     cargo run --features "\
        provisioner-daemon/backend_mock \
        provisioner-daemon/ui_echo_mate \
-       provisioner-daemon/policy_on_start"
+       provisioner-daemon/policy_on_start" 
 
     # 使用 radxa_x4 主题
     cargo run --features "\

@@ -28,7 +28,7 @@ zbus = { version = "5.12.0" }
 # Procedural macros for zbus (separated crate starting with zbus 5.x)
 zbus_macros = { version = "5.12.0" }
 # 前端：嵌入
-rust-embed = { version = "8" }
+rust-embed = { version = "8", features = ["interpolate-folder-path"] }
 mime_guess = "2"
 # 前端：磁盘 (调试用)
 tower-http = { version = "0.6.6", features = ["fs"] }
