@@ -4,16 +4,19 @@ use async_trait::async_trait;
 use rust_embed::RustEmbed;
 use std::borrow::Cow;
 
-// --- Use $CARGO_MANIFEST_DIR to create an absolute path at compile time ---
+
 #[cfg(feature = "ui_echo_mate")]
 #[derive(RustEmbed)]
-#[folder = "$CARGO_MANIFEST_DIR/../ui/themes/echo-mate/"]
-struct Asset;
+#[folder = "../ui/themes/echo-mate/"]
+struct AssetEcho;
 
-// --- Use $CARGO_MANIFEST_DIR to create an absolute path at compile time ---
+#[cfg(feature = "ui_echo_mate")]
+use AssetEcho as Asset;
+
+
 #[cfg(feature = "ui_radxa_x4")]
 #[derive(RustEmbed)]
-#[folder = "$CARGO_MANIFEST_DIR/../ui/themes/radxa_x4/"]
+#[folder = "../ui/themes/radxa_x4/"]
 struct AssetRadxa;
 
 // Provide a small shim so the rest of the code can use `Asset` name.
