@@ -24,7 +24,7 @@
 
     ```bash
     # 使用 networkmanager 后端并立即进入配网
-    cargo run --features "\
+    cargo build --features "\
        provisioner-daemon/backend_networkmanager_TDM \
        provisioner-daemon/ui_echo_mate \
        provisioner-daemon/policy_on_start"
