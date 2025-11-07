@@ -69,6 +69,8 @@ cross build \
 
 ```bash
 export RUST_LOG="debug,tower_http=debug"
+
+正确方式：sudo RUST_LOG="debug,tower_http=debug" ./provisioner-daemon
 ```
 
 rsync -avz --delete target/release/ archlinux:/home/hao/provisioner/

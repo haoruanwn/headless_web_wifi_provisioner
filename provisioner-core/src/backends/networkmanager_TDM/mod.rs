@@ -195,6 +195,48 @@ impl NetworkManagerTdmBackend {
             Err(_) => Ok(false),
         }
     }
+
+    /// 轮询：检查 wlan0 是否已连接到 *特定* SSID
+    async fn check_connected_to_ssid(ssid: &str) -> Result<bool> {
+        let output = Command::new("nmcli")
+            .arg("-t") // 简洁模式
+            .arg("-f") // 字段
+            .arg("NAME,DEVICE,STATE") // 获取 连接名, 设备, 状态
+            .arg("connection")
+            .arg("show")
+            .arg("--active") // 只显示激活的连接
+            .output()
+            .await;
+
+        match output {
+            Ok(out) => {
+                if !out.status.success() {
+                    return Ok(false);
+                }
+                let stdout = String::from_utf8_lossy(&out.stdout);
+                // 示例输出:
+                // MyHomeWifi:wlan0:activated
+                // eth0-conn:eth0:activated
+
+                for line in stdout.lines() {
+                    let parts: Vec<&str> = line.split(':').collect();
+                    if parts.len() >= 3 {
+                        let name = parts[0];   // e.g., "Xiaomi 14"
+                        let device = parts[1]; // e.g., "wlan0"
+                        let state = parts[2];  // e.g., "activated"
+
+                        // 检查 激活的连接名 是否等于 目标SSID，
+                        // 并且它是否在 wlan0 上，并且状态是 "activated"
+                        if name == ssid && device == IFACE_NAME && state == "activated" {
+                            return Ok(true); // 精确匹配成功
+                        }
+                    }
+                }
+                Ok(false) // 没有找到匹配的活动连接
+            }
+            Err(_) => Ok(false),
+        }
+    }
 }
 
 impl NetworkManagerTdmBackend {
@@ -213,39 +255,88 @@ impl NetworkManagerTdmBackend {
     }
 
     pub async fn connect_impl(&self, ssid: &str, password: &str) -> Result<()> {
-        // Try to use nmcli to connect
-        // For protected networks provide password, otherwise set open
-        if password.is_empty() {
-            let _ = Command::new("nmcli")
+        // 1. 停止 AP 模式
+        self.stop_ap().await?;
+        println!("📡 [NetworkManagerTDM] AP stopped.");
+
+        // 2. 显式断开 wlan0 接口，清除可能的假阳性连接状态
+        println!("📡 [NetworkManagerTDM] Disconnecting wlan0 from any existing network...");
+        let _ = Command::new("nmcli")
+            .arg("device")
+            .arg("disconnect")
+            .arg(IFACE_NAME)
+            .status()
+            .await;
+
+        // 等待接口释放
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+        // -----------------------------------------------------------------
+        // vvv [新修复] 强制执行一次新的扫描 vvv
+        // -----------------------------------------------------------------
+        println!("📡 [NetworkManagerTDM] Forcing device rescan...");
+        let rescan_status = Command::new("nmcli")
+            .arg("device")
+            .arg("wifi")
+            .arg("rescan") // <-- 命令 NM 重新扫描
+            .status()      // <-- 等待 rescan 命令 *本身* 退出 (这很快)
+            .await;
+            
+        if rescan_status.is_err() {
+             println!("📡 [NetworkManagerTDM] 'nmcli rescan' command failed to start.");
+        }
+        
+        // **关键**：给 NetworkManager 几秒钟时间来实际完成扫描并更新其内部缓存
+        // (这个延迟是必要的，模拟了 wpa_cli_TDM 的 sleep)
+        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+        println!("📡 [NetworkManagerTDM] Rescan complete (waited 5s).");
+        // -----------------------------------------------------------------
+        // ^^^ [新修复] ^^^
+        // -----------------------------------------------------------------
+
+        // 3. 异步 Spawn 连接命令
+        println!("📡 [NetworkManagerTDM] Spawning connect command for '{}'...", ssid);
+        let connect_cmd = if password.is_empty() {
+            Command::new("nmcli")
                 .arg("device")
                 .arg("wifi")
                 .arg("connect")
                 .arg(ssid)
-                .output()
-                .await;
+                .spawn()
         } else {
-            let _ = Command::new("nmcli")
+            Command::new("nmcli")
                 .arg("device")
                 .arg("wifi")
                 .arg("connect")
                 .arg(ssid)
                 .arg("password")
                 .arg(password)
-                .output()
-                .await;
+                .spawn()
+        };
+
+        // 检查 spawn 是否成功
+        if let Err(e) = connect_cmd {
+            println!("📡 [NetworkManagerTDM] Failed to spawn nmcli connect: {}", e);
+            let _ = self.start_ap().await; // 恢复 AP
+            return Err(Error::Io(e));
         }
-        // Best-effort: check connection state
-        for _ in 0..15 {
-            if let Ok(true) = Self::check_connected_nmcli().await {
+
+        // 4. 使用新的、更精确的轮询函数检查是否连接到指定 SSID
+        println!("📡 [NetworkManagerTDM] Polling for connection to '{}'...", ssid);
+        for i in 0..20 {
+            println!("📡 [NetworkManagerTDM] Polling... (Attempt {}/{})", i + 1, 20);
+            if let Ok(true) = Self::check_connected_to_ssid(ssid).await {
+                println!("📡 [NetworkManagerTDM] Connection to '{}' successful.", ssid);
                 return Ok(());
             }
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         }
-        // if failed, restore AP
-        let _ = self.start_ap().await;
-        Err(Error::CommandFailed(
-            "Connection timed out or failed".into(),
-        ))
+
+        // 5. 连接超时，恢复 AP 模式并返回错误
+        println!("📡 [NetworkManagerTDM] Connection to '{}' timed out, restoring AP...", ssid);
+        let _ = self.start_ap().await; // 恢复 AP
+
+        Err(Error::CommandFailed(format!("Connection to '{}' timed out (20s)", ssid).into()))
     }
 
     async fn enter_provisioning_mode_impl(&self) -> Result<()> {
