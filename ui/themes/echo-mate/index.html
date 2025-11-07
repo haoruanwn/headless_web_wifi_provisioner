@@ -1,323 +1,59 @@
-'''<!DOCTYPE html>
+<!doctype html>
 <html lang="zh-CN">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Echo-mate 配网</title>
-    <style>
-        :root {
-            --primary-color: #007bff;
-            --secondary-color: #6c757d;
-            --background-color: #f8f9fa;
-            --card-background: #ffffff;
-            --text-color: #212529;
-            --border-color: #dee2e6;
-            --spinner-size: 2rem;
-        }
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background-color: var(--background-color);
-            color: var(--text-color);
-            margin: 0;
-            padding: 1rem;
-            display: flex;
-            justify-content: center;
-        }
-        .container {
-            max-width: 500px;
-            width: 100%;
-        }
-        .header {
-            text-align: center;
-            margin-bottom: 1.5rem;
-        }
-        .header h1 {
-            font-size: 1.75rem;
-            margin: 0;
-        }
-        .card {
-            background-color: var(--card-background);
-            border: 1px solid var(--border-color);
-            border-radius: 0.5rem;
-            box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075);
-        }
-        .card-header {
-            padding: 0.75rem 1rem;
-            background-color: #f8f9fa;
-            border-bottom: 1px solid var(--border-color);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        .card-header span {
-            font-weight: 600;
-        }
-        .btn {
-            display: inline-block;
-            font-weight: 400;
-            text-align: center;
-            vertical-align: middle;
-            cursor: pointer;
-            border: 1px solid transparent;
-            padding: 0.375rem 0.75rem;
-            font-size: 1rem;
-            border-radius: 0.25rem;
-            transition: all 0.15s ease-in-out;
-        }
-        .btn-primary {
-            color: #fff;
-            background-color: var(--primary-color);
-            border-color: var(--primary-color);
-        }
-        .btn-primary:hover {
-            background-color: #0056b3;
-        }
-        .list-group-item {
-            padding: 0.75rem 1rem;
-            border-bottom: 1px solid var(--border-color);
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            cursor: pointer;
-        }
-        .list-group-item:last-child {
-            border-bottom: none;
-        }
-        .list-group-item:hover {
-            background-color: #f1f3f5;
-        }
-        .wifi-icon::before {
-            content: '📶';
-            font-size: 1.2rem;
-            margin-right: 0.5rem;
-        }
-        #scanner-status {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            padding: 2rem;
-            color: var(--secondary-color);
-        }
-        .spinner {
-            width: var(--spinner-size);
-            height: var(--spinner-size);
-            border: 3px solid rgba(0,0,0,0.1);
-            border-top-color: var(--primary-color);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-        .modal-backdrop {
-            position: fixed;
-            top: 0; left: 0;
-            width: 100%; height: 100%;
-            background-color: rgba(0,0,0,0.5);
-            display: none;
-            align-items: center;
-            justify-content: center;
-        }
-        .modal-content {
-            background: var(--card-background);
-            padding: 1.5rem;
-            border-radius: 0.5rem;
-            width: 90%;
-            max-width: 400px;
-        }
-        .modal-header {
-            border-bottom: none; padding: 0 0 1rem 0;
-        }
-        .modal-footer {
-            border-top: none; padding: 1rem 0 0 0;
-            display: flex;
-            justify-content: flex-end;
-            gap: 0.5rem;
-        }
-        .form-control {
-            width: 100%;
-            padding: 0.5rem;
-            font-size: 1rem;
-            border: 1px solid var(--border-color);
-            border-radius: 0.25rem;
-            box-sizing: border-box;
-        }
-        .d-none { display: none; }
-    </style>
-</head>
-<body>
-
-    <div class="container">
-        <div class="header">
-            <h1>Echo-mate 配网</h1>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Echo‑mate 配网</title>
+    <link rel="stylesheet" href="style.css">
+  </head>
+  <body>
+    <main class="page" role="main">
+      <header class="topbar" role="banner">
+        <div class="brand">
+          <img src="assets/logo.svg" alt="Echo‑mate" class="logo">
+          <div class="brand-text">
+            <h1>Echo‑mate 配网</h1>
+            <p class="muted">通过网页为设备配置 Wi‑Fi</p>
+          </div>
         </div>
+        <button id="refresh-btn" class="btn primary">刷新</button>
+      </header>
 
-        <div class="card">
-            <div class="card-header">
-                <span>可用网络</span>
-                <button id="refresh-btn" class="btn btn-primary">刷新</button>
+      <section class="card" id="scanner" aria-live="polite">
+        <div class="card-body">
+          <div id="wifi-list" class="wifi-list" aria-label="可用 Wi‑Fi 列表">
+            <div class="scanner-status">
+              <div class="spinner" aria-hidden="true"></div>
+              <div class="scanner-text">正在扫描 Wi‑Fi...</div>
             </div>
-            <div id="wifi-list">
-                <div id="scanner-status">
-                    <div class="spinner"></div>
-                    <p>正在扫描...</p>
-                </div>
-            </div>
+          </div>
         </div>
-    </div>
+      </section>
 
-    <div id="passwordModal" class="modal-backdrop">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 id="modal-ssid-name"></h5>
-            </div>
-            <form id="connect-form">
-                <div style="margin-bottom: 1rem;">
-                    <label for="password-input" style="display: block; margin-bottom: 0.5rem;">Wi-Fi 密码</label>
-                    <input type="password" class="form-control" id="password-input">
-                </div>
-                <div id="connection-status" class="d-none"></div>
-            </form>
-            <div class="modal-footer">
-                <button id="cancel-btn" type="button" class="btn">取消</button>
-                <button type="submit" form="connect-form" id="connect-btn" class="btn btn-primary">连接</button>
-            </div>
+      <footer class="footer">
+        <div class="copyright">Echo‑mate · 本地配网界面</div>
+      </footer>
+
+      <!-- 密码模态框 -->
+      <div id="passwordModal" class="modal" aria-hidden="true" role="dialog" aria-modal="true">
+        <div class="modal-card">
+          <button class="modal-close" id="modal-close" aria-label="关闭">×</button>
+          <header class="modal-header">
+            <h2 id="modal-ssid-name">连接 Wi‑Fi</h2>
+          </header>
+          <form id="connect-form" class="modal-body">
+            <label class="label">密码</label>
+            <input id="password-input" class="input" type="password" autocomplete="new-password" />
+            <div id="connection-status" class="status" aria-live="polite"></div>
+          </form>
+          <footer class="modal-footer">
+            <button id="cancel-btn" class="btn">取消</button>
+            <button id="connect-btn" type="submit" form="connect-form" class="btn primary">连接</button>
+          </footer>
         </div>
-    </div>
+      </div>
+    </main>
 
-    <script>
-        document.addEventListener('DOMContentLoaded', () => {
-            const wifiList = document.getElementById('wifi-list');
-            const scannerStatus = document.getElementById('scanner-status');
-            const refreshBtn = document.getElementById('refresh-btn');
-            const modal = document.getElementById('passwordModal');
-            const modalSsidName = document.getElementById('modal-ssid-name');
-            const passwordInput = document.getElementById('password-input');
-            const connectForm = document.getElementById('connect-form');
-            const connectBtn = document.getElementById('connect-btn');
-            const cancelBtn = document.getElementById('cancel-btn');
-            const connectionStatus = document.getElementById('connection-status');
-
-            let selectedSsid = '';
-
-            const showModal = (ssid) => {
-                selectedSsid = ssid;
-                modalSsidName.textContent = `连接到 ${ssid}`;
-                passwordInput.value = '';
-                connectionStatus.classList.add('d-none');
-                connectBtn.disabled = false;
-                connectBtn.innerHTML = '连接';
-                modal.style.display = 'flex';
-            };
-
-            const closeModal = () => {
-                modal.style.display = 'none';
-            };
-
-            const showScannerStatus = (message) => {
-                wifiList.innerHTML = '';
-                // 确保 scannerStatus 元素存在于 DOM 中
-                if (!scannerStatus.parentElement) {
-                    wifiList.appendChild(scannerStatus);
-                }
-                scannerStatus.querySelector('p').textContent = message;
-            };
-
-            // --- 修改后的 fetchWifiNetworks （简单重试策略） ---
-            const fetchWifiNetworks = async () => {
-                showScannerStatus('正在扫描 (AP将短暂重启)...');
-                refreshBtn.disabled = true;
-
-                let response;
-                try {
-                    response = await fetch('/api/scan');
-                } catch (error) {
-                    // 这是预期的 "Failed to fetch"
-                    if (error.message && error.message.includes('Failed to fetch')) {
-                        console.warn('Fetch failed (expected). Retrying after AP restart...');
-                        showScannerStatus('AP重启中，7秒后自动刷新...');
-                        setTimeout(fetchWifiNetworks, 7000);
-                        return;
-                    } else {
-                        // 非预期错误，展示并退出
-                        showScannerStatus(`扫描出错: ${error.message}`);
-                        refreshBtn.disabled = false;
-                        return;
-                    }
-                }
-
-                try {
-                    if (!response.ok) {
-                        throw new Error(`扫描失败 (状态码: ${response.status})`);
-                    }
-                    const networks = await response.json();
-
-                    wifiList.innerHTML = '';
-                    if (networks.length === 0) {
-                        showScannerStatus('未找到 Wi-Fi 网络');
-                    } else {
-                        networks.forEach(net => {
-                            const item = document.createElement('div');
-                            item.className = 'list-group-item';
-                            item.innerHTML = `<span><span class="wifi-icon"></span>${net.ssid}</span><span>${net.signal}%</span>`;
-                            item.onclick = () => {
-                                if (net.security !== 'Open') {
-                                    showModal(net.ssid);
-                                } else {
-                                    handleConnect(net.ssid, '');
-                                }
-                            };
-                            wifiList.appendChild(item);
-                        });
-                    }
-                } catch (error) {
-                    showScannerStatus(`扫描出错: ${error.message}`);
-                } finally {
-                    refreshBtn.disabled = false;
-                }
-            };
-
-            const handleConnect = async (ssid, password) => {
-                connectBtn.disabled = true;
-                connectBtn.innerHTML = '<div class="spinner" style="--spinner-size: 1rem; border-width: 2px;"></div>';
-                connectionStatus.classList.remove('d-none');
-                connectionStatus.textContent = '正在连接...';
-                connectionStatus.style.color = 'var(--secondary-color)';
-
-                try {
-                    const response = await fetch('/api/connect', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ ssid, password })
-                    });
-
-                    if (!response.ok) {
-                        const errData = await response.json();
-                        throw new Error(errData.error || '连接失败');
-                    }
-
-                    connectionStatus.textContent = '连接成功！设备将退出配网模式。';
-                    connectionStatus.style.color = 'green';
-                    setTimeout(closeModal, 3000);
-
-                } catch (error) {
-                    connectionStatus.textContent = `连接失败: ${error.message}`;
-                    connectionStatus.style.color = 'red';
-                    connectBtn.disabled = false;
-                    connectBtn.innerHTML = '连接';
-                }
-            };
-
-            refreshBtn.addEventListener('click', fetchWifiNetworks);
-            cancelBtn.addEventListener('click', closeModal);
-            connectForm.addEventListener('submit', (e) => {
-                e.preventDefault();
-                handleConnect(selectedSsid, passwordInput.value);
-            });
-
-            // Initial scan
-            fetchWifiNetworks();
-        });
-    </script>
-</body>
-</html>'''
+    <script src="app.js"></script>
+  </body>
+</html>
