@@ -19,14 +19,14 @@ jobs:
       matrix:
         include:
           - target: armv7-unknown-linux-musleabihf
-            asset_suffix: wpa_supplicant-dbus-armv7-musleabihf
-            features: "provisioner-daemon/backend_wpa_dbus,provisioner-daemon/ui_echo_mate"
+            asset_suffix: wpa_cli_TDM-echo-mate-armv7-musleabihf
+            features: "provisioner-daemon/backend_wpa_cli_TDM,provisioner-daemon/ui_echo_mate, provisioner-daemon/policy_on_start"
             env_rustflags: "-C target-feature=+crt-static"
 
-          - target: armv7-unknown-linux-musleabihf
-            asset_suffix: wpa_cli-dnsmasq-armv7-musleabihf
-            features: "provisioner-daemon/backend_wpa_cli_exclusive,provisioner-daemon/ui_echo_mate"
-            env_rustflags: "-C target-feature=+crt-static"
+          # - target: armv7-unknown-linux-musleabihf
+          #   asset_suffix: wpa_cli-dnsmasq-armv7-musleabihf
+          #   features: "provisioner-daemon/backend_wpa_cli_exclusive,provisioner-daemon/ui_echo_mate"
+          #   env_rustflags: "-C target-feature=+crt-static"
 
     steps:
       - name: "1. Checkout Repository"
@@ -116,23 +116,43 @@ jobs:
           path: artifacts # 下载到 'artifacts' 文件夹
 
       # --- 修改点 4: 循环上传所有产物 ---
-      - name: "4. Upload All Release Assets"
+      - name: "4. Package & Upload All Assets"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # artifacts 目录结构会是:
-          # artifacts/provisioner-daemon-wpa_supplicant-dbus.../provisioner-daemon-wpa_supplicant-dbus...
-          # artifacts/provisioner-daemon-wpa_cli-dnsmasq.../provisioner-daemon-wpa_cli-dnsmasq...
+          # ------------------------------------------------
+          # 1. (新增) 打包并上传 UI 文件夹
+          # ------------------------------------------------
+          # 我们使用 tag name 来命名压缩包 (e.g., ui-assets-v0.1.0.tar.gz)
+          UI_ASSET_NAME="ui-assets-${{ github.ref_name }}.tar.gz"
           
-          # 我们需要找到所有下载的二进制文件
-          # 使用 find 找到所有在 'artifacts' 子目录中的文件
+          echo "Packaging UI folder into $UI_ASSET_NAME"
+          
+          # -c: 创建 (create)
+          # -z: Gzip 压缩
+          # -f: 文件 (file)
+          # -C .: 切换到当前目录 (workspace 根目录)
+          # ui:   要压缩的文件夹
+          tar -czf $UI_ASSET_NAME -C . ui
+          
+          echo "Uploading UI asset: $UI_ASSET_NAME"
+          gh release upload \
+            "${{ github.ref_name }}" \
+            "$UI_ASSET_NAME" \
+            --clobber
+          
+          echo "--- UI asset upload complete ---"
+          
+          # ------------------------------------------------
+          # 2. (保留) 上传所有已编译的二进制文件
+          # ------------------------------------------------
+          echo "--- Starting binary artifact uploads ---"
           find artifacts -type f | while read asset_path; do
             asset_name=$(basename "$asset_path")
-            echo "Uploading $asset_name from $asset_path"
+            echo "Uploading binary: $asset_name from $asset_path"
             
-            # 使用 actions/upload-release-asset@v1 推荐的 gh release upload 命令
             gh release upload \
               "${{ github.ref_name }}" \
               "$asset_path" \
-              --clobber # 如果同名文件存在则覆盖
+              --clobber
           done

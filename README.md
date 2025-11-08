@@ -61,7 +61,7 @@ cross build \
     --features "\
       provisioner-daemon/backend_wpa_cli_TDM \
       provisioner-daemon/ui_echo_mate \
-      provisioner-daemon/policy_daemon_if_disconnected" \
+      provisioner-daemon/policy_on_start" \
    --config 'target.armv7-unknown-linux-musleabihf.rustflags=["-C", "target-feature=+crt-static"]'
 ```
 
