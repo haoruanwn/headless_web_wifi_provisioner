@@ -7,6 +7,7 @@ use std::sync::Arc;
 use tokio::process::Command;
 use tokio::sync::Mutex;
 
+// 通过调用nmcli命令行工具实现的TDM后端，适用于使用NetworkManager管理网络连接的Linux系统
 const IFACE_NAME: &str = "wlan0";
 
 static GLOBAL_AP_CONFIG: Lazy<ApConfig> = Lazy::new(|| {

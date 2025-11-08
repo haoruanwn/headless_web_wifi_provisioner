@@ -27,7 +27,7 @@ struct TdmAppState<F> {
     initial_networks: Arc<Mutex<Vec<crate::traits::Network>>>,
 }
 
-/// 根据并非特定后端能力实现的 Trait 对象，启动实时扫描的 Web 服务器
+/// 启动实时扫描的 Web 服务器，用于支持并发能力的后端
 pub fn start_concurrent_server<F>(
     backend: Arc<dyn ConcurrentBackend + Send + Sync + 'static>,
     frontend: Arc<F>,
@@ -55,7 +55,7 @@ where
     })
 }
 
-/// 根据并非特定后端能力实现的 Trait 对象，启动 TDM（预扫描）的 Web 服务器
+/// 启动 TDM（预扫描）的 Web 服务器，用于分时复用能力的后端
 pub fn start_tdm_server<F>(
     backend: Arc<dyn TdmBackend + Send + Sync + 'static>,
     frontend: Arc<F>,

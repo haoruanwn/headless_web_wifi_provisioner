@@ -12,6 +12,8 @@ use zbus::{Connection, Proxy};
 use zbus::proxy::SignalStream;
 use futures_util::stream::StreamExt;
 
+// 通过 D-Bus 与 NetworkManager 进行交互的功能
+
 // This backend is a stub showcasing DBus interaction with NetworkManager for scanning & connecting.
 // AP mode still leverages nmcli commands for simplicity; later we can move those to pure D-Bus calls.
 
@@ -21,6 +23,8 @@ static GLOBAL_AP_CONFIG: Lazy<ApConfig> = Lazy::new(|| {
 });
 
 const IFACE_NAME: &str = "wlan0";
+
+// D-Bus constants for NetworkManager
 const NM_SERVICE: &str = "org.freedesktop.NetworkManager";
 const NM_PATH: &str = "/org/freedesktop/NetworkManager";
 const NM_IFACE: &str = "org.freedesktop.NetworkManager";

@@ -13,6 +13,8 @@ use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 use zbus::{Connection, Proxy};
 use futures_util::stream::StreamExt;
 
+// 通过 D-Bus 与 wpa_supplicant 进行交互的功能
+
 // MVP DBus backend for wpa_supplicant + external hostapd/dnsmasq for AP mode.
 // Station operations (scan/connect) will use DBus where feasible; fallback to wpa_cli textual parsing for now.
 
@@ -22,6 +24,8 @@ static GLOBAL_AP_CONFIG: Lazy<ApConfig> = Lazy::new(|| {
 });
 
 const IFACE_NAME: &str = "wlan0";
+
+// D-Bus constants for wpa_supplicant
 const WPA_SUPPLICANT_SERVICE: &str = "fi.w1.wpa_supplicant1";
 const WPA_SUPPLICANT_PATH: &str = "/fi/w1/wpa_supplicant1"; // root manager path
 const WPA_SUPPLICANT_INTERFACE: &str = "fi.w1.wpa_supplicant1";
@@ -89,18 +93,31 @@ impl WpaDbusTdmBackend {
             return Ok(path);
         }
 
-        // Try to start wpa_supplicant and retry
-        let _ = Command::new("wpa_supplicant")
+        // 在这里用命令启动wpa_supplicant守护进程，这是必要的一部，因为D-Bus接口的可用性依赖于此
+        // wpa_supplicant daemon not yet available via D-Bus, try to start it
+        // This is a necessary precondition for D-Bus interface availability
+        tracing::info!("wpa_supplicant D-Bus interface not available, attempting to start daemon...");
+        let spawn_result = Command::new("wpa_supplicant")
             .arg("-B")
             .arg(format!("-i{}", IFACE_NAME))
             .arg("-c/etc/wpa_supplicant.conf")
             .spawn();
+        
+        match spawn_result {
+            Ok(_) => {
+                tracing::debug!("wpa_supplicant daemon started, waiting for D-Bus interface...");
+            }
+            Err(e) => {
+                tracing::warn!("Failed to spawn wpa_supplicant: {}", e);
+            }
+        }
+        
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
         let reply = mgr
             .call_method("GetInterface", &(IFACE_NAME,))
             .await
-            .map_err(|e| Error::CommandFailed(format!("GetInterface failed: {}", e)))?;
+            .map_err(|e| Error::CommandFailed(format!("GetInterface failed after daemon startup: {}", e)))?;
         let path: OwnedObjectPath = reply
             .body()
             .deserialize()
@@ -236,6 +253,7 @@ impl WpaDbusTdmBackend {
         Ok(networks)
     }
 
+    // 启动 AP 模式，配置并启动 hostapd 和 dnsmasq
     async fn start_ap(&self) -> Result<()> {
         let _ = Command::new("killall")
             .arg("-9")

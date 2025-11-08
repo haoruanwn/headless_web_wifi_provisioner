@@ -1,6 +1,3 @@
-// 后端：wpa_cli_TDM（时分复用调用 wpa_cli）
-// 基于之前的 wpa_cli_exclusive2 实现做了重命名并修复了 dnsmasq --address 参数。
-
 use crate::config::ap_config_from_toml_str;
 use crate::traits::{ApConfig, ConnectionRequest, Network, PolicyCheck, TdmBackend};
 use crate::{Error, Result};
