@@ -11,12 +11,12 @@ fn create_static_frontend() -> Arc<impl UiAssetProvider + 'static> {
     const _: () = assert!(UI_THEME_COUNT == 1, "Select exactly ONE UI theme.");
     let _ = UI_THEME_COUNT;
 
-    #[cfg(feature = "backend_mock")]
+    #[cfg(any(feature = "backend_mock_concurrent", feature = "backend_mock_TDM"))]
     {
         println!("💿 Frontend: Disk Provider selected (Static Dispatch)");
         Arc::new(provisioner_core::frontends::provider_disk::DiskFrontend::new())
     }
-    #[cfg(not(feature = "backend_mock"))]
+    #[cfg(not(any(feature = "backend_mock_concurrent", feature = "backend_mock_TDM")))]
     {
         println!("📦 Frontend: Embed Provider selected (Static Dispatch)");
         Arc::new(provisioner_core::frontends::provider_embed::EmbedFrontend::new())
@@ -26,18 +26,13 @@ fn create_static_frontend() -> Arc<impl UiAssetProvider + 'static> {
 // 1. New function to create both trait objects
 //    - policy_backend: For the policy layer (needs is_connected)
 //    - runner_backend: For the execution layer (needs TDM/Concurrent specifics)
-fn create_static_backend() -> anyhow::Result<(
-    Arc<dyn PolicyCheck + Send + Sync + 'static>,
-    BackendRunner,
-)> {
-    
+// 简化：仅返回 BackendRunner，由 policy 层再提取 PolicyCheck
+fn create_static_backend() -> anyhow::Result<BackendRunner> {
     #[cfg(feature = "backend_wpa_cli_TDM")]
     {
         println!("📡 Backend: WPA CLI TDM (Static Dispatch)");
         let backend = Arc::new(provisioner_core::backends::wpa_cli_TDM::WpaCliTdmBackend::new()?);
-        // Return two Arcs: one for the policy (TdmBackend implements ProvisioningTerminator)
-        // and the other for the runner (wrapped in the Enum).
-        return Ok((backend.clone(), BackendRunner::Tdm(backend)));
+        return Ok(BackendRunner::Tdm(backend));
     }
 
     #[cfg(feature = "backend_networkmanager_TDM")]
@@ -46,21 +41,28 @@ fn create_static_backend() -> anyhow::Result<(
         let backend = Arc::new(
             provisioner_core::backends::networkmanager_TDM::NetworkManagerTdmBackend::new()?,
         );
-        return Ok((backend.clone(), BackendRunner::Tdm(backend)));
+        return Ok(BackendRunner::Tdm(backend));
     }
 
-    #[cfg(feature = "backend_mock")]
+    #[cfg(feature = "backend_mock_concurrent")]
     {
-        println!("🔧 Backend: MockBackend (Static Dispatch)");
-        let backend = Arc::new(provisioner_core::backends::mock::MockBackend::new());
-        return Ok((backend.clone(), BackendRunner::Concurrent(backend)));
+        println!("🔧 Backend: Mock Concurrent (Static Dispatch)");
+        let backend = Arc::new(provisioner_core::backends::mock::MockConcurrentBackend::new());
+        return Ok(BackendRunner::Concurrent(backend));
     }
 
-    // Compile-time check
+    #[cfg(feature = "backend_mock_TDM")]
+    {
+        println!("🔧 Backend: Mock TDM (Static Dispatch)");
+        let backend = Arc::new(provisioner_core::backends::mock::MockTdmBackend::new());
+        return Ok(BackendRunner::Tdm(backend));
+    }
+
     #[cfg(not(any(
         feature = "backend_wpa_cli_TDM",
         feature = "backend_networkmanager_TDM",
-        feature = "backend_mock"
+        feature = "backend_mock_concurrent",
+        feature = "backend_mock_TDM"
     )))]
     compile_error!("Select exactly ONE backend feature.");
 }
@@ -73,10 +75,9 @@ async fn main() -> anyhow::Result<()> {
     let frontend = create_static_frontend();
     
     // 2. Create and destructure the two trait objects
-    let (policy_backend, runner_backend) = create_static_backend()?;
-
-    // 3. Inject the trait objects into policy::dispatch, no more cfg needed here
-    policy::dispatch(frontend, policy_backend, runner_backend).await?;
+    let runner_backend = create_static_backend()?;
+    // 由 policy::dispatch 自行根据 BackendRunner 抽取 PolicyCheck
+    policy::dispatch(frontend, runner_backend).await?;
 
     Ok(())
 }

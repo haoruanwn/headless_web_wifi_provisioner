@@ -14,7 +14,6 @@ use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 
 // --- App States with Type-Erased Trait Objects ---
-
 // State for concurrent (real-time scanning) servers
 struct ConcurrentAppState<F> {
     backend: Arc<dyn ConcurrentBackend + Send + Sync + 'static>,
@@ -28,7 +27,7 @@ struct TdmAppState<F> {
     initial_networks: Arc<Mutex<Vec<crate::traits::Network>>>,
 }
 
-/// Starts a concurrent (real-time scanning) server using a type-erased backend.
+/// 根据并非特定后端能力实现的 Trait 对象，启动实时扫描的 Web 服务器
 pub fn start_concurrent_server<F>(
     backend: Arc<dyn ConcurrentBackend + Send + Sync + 'static>,
     frontend: Arc<F>,
@@ -40,6 +39,7 @@ where
 
     let app = Router::new()
         .route("/", get(serve_index_concurrent::<F>))
+        .route("/api/backend_kind", get(api_backend_kind_concurrent))
         .route("/api/scan", get(api_scan_concurrent::<F>))
         .route("/api/connect", post(api_connect_concurrent::<F>))
         .route("/{*path}", get(serve_static_asset_concurrent::<F>))
@@ -48,9 +48,9 @@ where
     tokio::spawn(async move {
         app_state.backend.enter_provisioning_mode().await?;
 
-        #[cfg(not(feature = "backend_mock"))]
+    #[cfg(not(any(feature = "backend_mock_concurrent", feature = "backend_mock_TDM")))]
         let addr = SocketAddr::from(([192, 168, 4, 1], 80));
-        #[cfg(feature = "backend_mock")]
+    #[cfg(any(feature = "backend_mock_concurrent", feature = "backend_mock_TDM"))]
         let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
 
         println!("🌐 Concurrent Web server listening on {}", addr);
@@ -60,7 +60,7 @@ where
     })
 }
 
-/// Starts a TDM (pre-scanned) server using a type-erased backend.
+/// 根据并非特定后端能力实现的 Trait 对象，启动 TDM（预扫描）的 Web 服务器
 pub fn start_tdm_server<F>(
     backend: Arc<dyn TdmBackend + Send + Sync + 'static>,
     frontend: Arc<F>,
@@ -79,6 +79,7 @@ where
 
         let app = Router::new()
             .route("/", get(serve_index_tdm::<F>))
+            .route("/api/backend_kind", get(api_backend_kind_tdm))
             .route("/api/scan", get(api_scan_tdm::<F>))
             .route("/api/connect", post(api_connect_tdm::<F>))
             .route("/{*path}", get(serve_static_asset_tdm::<F>))
@@ -93,7 +94,6 @@ where
 }
 
 // --- Route Handlers (Generic & Concurrent) ---
-
 async fn serve_index_concurrent<F>(
     State(state): State<Arc<ConcurrentAppState<F>>>,
 ) -> impl IntoResponse
@@ -103,6 +103,7 @@ where
     serve_static_asset_concurrent(State(state), Path("index.html".to_string())).await
 }
 
+/// Serves static assets for concurrent backend.
 async fn serve_static_asset_concurrent<F>(
     State(state): State<Arc<ConcurrentAppState<F>>>,
     Path(path): Path<String>,
@@ -134,6 +135,7 @@ where
     }
 }
 
+/// 对应前端请求，执行实时扫描
 async fn api_scan_concurrent<F>(State(state): State<Arc<ConcurrentAppState<F>>>) -> impl IntoResponse
 where
     F: UiAssetProvider,
@@ -147,6 +149,11 @@ where
         )
             .into_response(),
     }
+}
+
+/// 返回后端类型：concurrent
+async fn api_backend_kind_concurrent() -> impl IntoResponse {
+    (StatusCode::OK, Json(serde_json::json!({ "kind": "concurrent" }))).into_response()
 }
 
 // --- Route Handlers (Generic & TDM) ---
@@ -189,6 +196,7 @@ where
     }
 }
 
+/// 对应前端请求，返回预扫描的网络列表
 async fn api_scan_tdm<F>(State(state): State<Arc<TdmAppState<F>>>) -> impl IntoResponse
 where
     F: UiAssetProvider,
@@ -198,7 +206,12 @@ where
     (StatusCode::OK, Json(networks)).into_response()
 }
 
-// --- Common Route Handlers ---
+/// 返回后端类型：tdm
+async fn api_backend_kind_tdm() -> impl IntoResponse {
+    (StatusCode::OK, Json(serde_json::json!({ "kind": "tdm" }))).into_response()
+}
+
+
 
 #[derive(Deserialize)]
 pub struct ConnectRequest {

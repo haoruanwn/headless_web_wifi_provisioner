@@ -12,6 +12,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const modalClose = document.getElementById('modal-close');
 
   let selectedSsid = null;
+  let backendKind = 'unknown';
 
   function showScannerStatus(text){
     wifiList.innerHTML = `<div class="scanner-status"><div class="spinner"></div><div class="scanner-text">${text}</div></div>`;
@@ -129,6 +130,22 @@ document.addEventListener('DOMContentLoaded', () => {
       '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":"&#39;"}[c]));
   }
 
-  // initial scan
-  fetchWifiNetworks();
+  // detect backend kind and hide refresh for TDM
+  (async () => {
+    try{
+      const res = await fetch('/api/backend_kind');
+      if(res.ok){
+        const j = await res.json();
+        backendKind = j.kind || 'unknown';
+        if(backendKind === 'tdm' && refreshBtn){
+          refreshBtn.style.display = 'none';
+        }
+      }
+    }catch(e){
+      // ignore, default behavior
+    } finally {
+      // initial scan after backend kind check
+      fetchWifiNetworks();
+    }
+  })();
 });

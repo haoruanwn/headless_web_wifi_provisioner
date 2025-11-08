@@ -2,7 +2,7 @@
 pub mod utils;
 
 // 保留的后端（只导出三个）：
-#[cfg(feature = "backend_mock")]
+#[cfg(any(feature = "backend_mock_concurrent", feature = "backend_mock_TDM"))]
 pub mod mock;
 
 #[cfg(feature = "backend_wpa_cli_TDM")]

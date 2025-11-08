@@ -50,7 +50,7 @@
 # 本地快速测试：立即进入配网（On-Start 策略）
 # 使用 mock 后端 和 echo_mate 主题
 cargo run --release --features "\
-   provisioner-daemon/backend_mock \
+   provisioner-daemon/backend_mock_TDM \
    provisioner-daemon/ui_echo_mate \
    provisioner-daemon/policy_on_start"
 

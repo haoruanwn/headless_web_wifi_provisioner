@@ -10,7 +10,7 @@ pub fn create_frontend() -> Arc<dyn UiAssetProvider> {
     let _ = UI_THEME_COUNT;
 
     // Disk provider for local development (mock)
-    #[cfg(feature = "backend_mock")]
+    #[cfg(any(feature = "backend_mock_concurrent", feature = "backend_mock_TDM"))]
     {
         println!("💿 Frontend: Disk Provider selected (for local development)");
         return Arc::new(crate::frontends::provider_disk::DiskFrontend::new());
@@ -18,19 +18,19 @@ pub fn create_frontend() -> Arc<dyn UiAssetProvider> {
 
     // Embedded provider for real device builds — only compile this branch
     // when one of the ui_* features is selected (avoids unresolved module errors).
-    #[cfg(all(not(feature = "backend_mock"), feature = "ui_echo_mate"))]
+    #[cfg(all(not(any(feature = "backend_mock_concurrent", feature = "backend_mock_TDM")), feature = "ui_echo_mate"))]
     {
         println!("📦 Frontend: Embed Provider (echo-mate) selected");
         return Arc::new(crate::frontends::provider_embed::EmbedFrontend::new());
     }
 
-    #[cfg(all(not(feature = "backend_mock"), feature = "ui_radxa_x4"))]
+    #[cfg(all(not(any(feature = "backend_mock_concurrent", feature = "backend_mock_TDM")), feature = "ui_radxa_x4"))]
     {
         println!("📦 Frontend: Embed Provider (radxa_x4) selected");
         return Arc::new(crate::frontends::provider_embed::EmbedFrontend::new());
     }
 
     // If we reach here, no frontend was configured at compile time.
-    #[cfg(all(not(feature = "backend_mock"), not(feature = "ui_echo_mate"), not(feature = "ui_radxa_x4")))]
-    compile_error!("No UI frontend selected: enable `backend_mock` or one of the ui_* features (ui_echo_mate, ui_radxa_x4).");
+    #[cfg(all(not(any(feature = "backend_mock_concurrent", feature = "backend_mock_TDM")), not(feature = "ui_echo_mate"), not(feature = "ui_radxa_x4")))]
+    compile_error!("No UI frontend selected: enable a mock backend (backend_mock_concurrent or backend_mock_TDM) or one of the ui_* features (ui_echo_mate, ui_radxa_x4).");
 }

@@ -4,17 +4,16 @@ use provisioner_core::{
 };
 use std::sync::Arc;
 
-// 1. Define a public Enum that holds a type-erased Trait object.
+// 不同的后端能力通过该枚举进行区分和传递
 pub enum BackendRunner {
     Tdm(Arc<dyn TdmBackend + Send + Sync + 'static>),
     Concurrent(Arc<dyn ConcurrentBackend + Send + Sync + 'static>),
 }
 
-// 2. Remove all cfg blocks from runner.rs.
-//    `run_provisioning_server` now accepts the Enum.
+// 通过BackendRunner枚举来区分不同后端能力，来调用不同的服务器启动逻辑
 pub async fn run_provisioning_server<F>(
     frontend: Arc<F>,
-    backend_runner: BackendRunner, // Accept the Enum
+    backend_runner: BackendRunner, // 接受枚举类型
 ) -> anyhow::Result<()>
 where
     F: UiAssetProvider + 'static,

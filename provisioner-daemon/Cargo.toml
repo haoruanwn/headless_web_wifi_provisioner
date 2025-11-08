@@ -16,7 +16,8 @@ provisioner-core = { path = "../provisioner-core", default-features = false }
 [features]
 # 定义自己的特性，然后"转发" 给 core Crate。
 # 这让我们可以从顶层通过 `provisioner-daemon/<feature>` 来控制所有编译。
-backend_mock = ["provisioner-core/backend_mock"]
+backend_mock_concurrent = ["provisioner-core/backend_mock_concurrent"]
+backend_mock_TDM = ["provisioner-core/backend_mock_TDM"]
 backend_wpa_cli_TDM = ["provisioner-core/backend_wpa_cli_TDM"]
 backend_networkmanager_TDM = ["provisioner-core/backend_networkmanager_TDM"]
 
