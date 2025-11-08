@@ -3,31 +3,33 @@
 // This is intentionally conservative and best-effort; it mirrors the WpaCli TDM
 // behaviour but uses NetworkManager where available.
 
-use crate::traits::{Network, PolicyCheck, TdmBackend};
+use crate::traits::{ApConfig, ConnectionRequest, Network, PolicyCheck, TdmBackend};
 use crate::{Error, Result};
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::process::Command;
 use std::net::{SocketAddr, Ipv4Addr};
-use std::str::FromStr;
 use tokio::sync::Mutex;
 
 const IFACE_NAME: &str = "wlan0";
-const AP_IP_ADDR: &str = "192.168.4.1/24";
 
 #[derive(Debug)]
 pub struct NetworkManagerTdmBackend {
-    // name of the hotspot connection created via nmcli (if any)
+    ap_config: Arc<ApConfig>,
     hotspot_name: Arc<Mutex<Option<String>>>,
     last_scan: Arc<Mutex<Option<Vec<Network>>>>,
 }
 
-const PROV_SSID: &str = "ProvisionerAP";
-const PROV_PSK: &str = "20542054";
-
 impl NetworkManagerTdmBackend {
     pub fn new() -> Result<Self> {
+        let cfg = ApConfig {
+            ssid: "ProvisionerAP".to_string(),
+            psk: "20542054".to_string(),
+            bind_addr: SocketAddr::new(Ipv4Addr::new(192, 168, 4, 1).into(), 80),
+            gateway_cidr: "192.168.4.1/24".to_string(),
+        };
         Ok(Self {
+            ap_config: Arc::new(cfg),
             hotspot_name: Arc::new(Mutex::new(None)),
             last_scan: Arc::new(Mutex::new(None)),
         })
@@ -52,17 +54,17 @@ impl NetworkManagerTdmBackend {
             .arg("autoconnect")
             .arg("no")
             .arg("ssid")
-            .arg(PROV_SSID) // PROV_SSID 已定义为 "ProvisionerAP"
+            .arg(&self.ap_config.ssid)
             .arg("802-11-wireless.mode")
             .arg("ap")
             .arg("ipv4.method")
             .arg("shared")
             .arg("ipv4.addresses")
-            .arg(AP_IP_ADDR) // AP_IP_ADDR 已定义为 192.168.4.1/24
+            .arg(&self.ap_config.gateway_cidr)
             .arg("wifi-sec.key-mgmt")
             .arg("wpa-psk")
             .arg("wifi-sec.psk")
-            .arg(PROV_PSK) // PROV_PSK 已定义为 "provisioner123"
+            .arg(&self.ap_config.psk)
             .output()
             .await?;
 
@@ -390,17 +392,15 @@ impl PolicyCheck for NetworkManagerTdmBackend {
 
 #[async_trait]
 impl TdmBackend for NetworkManagerTdmBackend {
-    fn get_bind_address(&self) -> SocketAddr {
-        let ip_str = AP_IP_ADDR.split('/').next().unwrap_or("192.168.4.1");
-        let ip = Ipv4Addr::from_str(ip_str).unwrap_or(Ipv4Addr::new(192,168,4,1));
-        SocketAddr::new(ip.into(), 80)
+    fn get_ap_config(&self) -> ApConfig {
+        self.ap_config.as_ref().clone()
     }
     async fn enter_provisioning_mode_with_scan(&self) -> Result<Vec<Network>> {
         self.enter_provisioning_mode_with_scan_impl().await
     }
 
-    async fn connect(&self, ssid: &str, password: &str) -> Result<()> {
-        self.connect_impl(ssid, password).await
+    async fn connect(&self, req: &ConnectionRequest) -> Result<()> {
+        self.connect_impl(&req.ssid, &req.password).await
     }
 
     async fn exit_provisioning_mode(&self) -> Result<()> {

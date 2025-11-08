@@ -1,4 +1,4 @@
-use crate::traits::{ConcurrentBackend, TdmBackend, UiAssetProvider};
+use crate::traits::{ConcurrentBackend, ConnectionRequest, TdmBackend, UiAssetProvider};
 use axum::body::Body;
 use axum::{
     Json, Router,
@@ -7,8 +7,8 @@ use axum::{
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use serde::Deserialize;
-use std::net::SocketAddr;
+// no local request structs; using traits::ConnectionRequest
+// no direct use of SocketAddr here; backends provide bind addr via ApConfig
 use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
@@ -47,9 +47,9 @@ where
 
     tokio::spawn(async move {
         app_state.backend.enter_provisioning_mode().await?;
-        let addr = app_state.backend.get_bind_address();
-        println!("🌐 Concurrent Web server listening on {}", addr);
-        let listener = TcpListener::bind(addr).await?;
+        let cfg = app_state.backend.get_ap_config();
+        println!("🌐 Concurrent Web server listening on {}", cfg.bind_addr);
+        let listener = TcpListener::bind(cfg.bind_addr).await?;
         axum::serve(listener, app.into_make_service()).await?;
         Ok(())
     })
@@ -80,9 +80,9 @@ where
             .route("/{*path}", get(serve_static_asset_tdm::<F>))
             .with_state(app_state.clone());
 
-        let addr = app_state.backend.get_bind_address();
-        println!("🌐 TDM Web server listening on {}", addr);
-        let listener = TcpListener::bind(addr).await?;
+        let cfg = app_state.backend.get_ap_config();
+        println!("🌐 TDM Web server listening on {}", cfg.bind_addr);
+        let listener = TcpListener::bind(cfg.bind_addr).await?;
         axum::serve(listener, app.into_make_service()).await?;
         Ok(())
     })
@@ -208,21 +208,15 @@ async fn api_backend_kind_tdm() -> impl IntoResponse {
 
 
 
-#[derive(Deserialize)]
-pub struct ConnectRequest {
-    ssid: String,
-    password: String,
-}
-
 async fn api_connect_concurrent<F>(
     State(state): State<Arc<ConcurrentAppState<F>>>,
-    Json(payload): Json<ConnectRequest>,
+    Json(payload): Json<ConnectionRequest>,
 ) -> impl IntoResponse
 where
     F: UiAssetProvider,
 {
     tracing::debug!(ssid = %payload.ssid, "Handling /api/connect request (Concurrent)");
-    match state.backend.connect(&payload.ssid, &payload.password).await {
+    match state.backend.connect(&payload).await {
         Ok(_) => (StatusCode::OK, Json(serde_json::json!({ "status": "success" }))).into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -234,13 +228,13 @@ where
 
 async fn api_connect_tdm<F>(
     State(state): State<Arc<TdmAppState<F>>>,
-    Json(payload): Json<ConnectRequest>,
+    Json(payload): Json<ConnectionRequest>,
 ) -> impl IntoResponse
 where
     F: UiAssetProvider,
 {
     tracing::debug!(ssid = %payload.ssid, "Handling /api/connect request (TDM)");
-    match state.backend.connect(&payload.ssid, &payload.password).await {
+    match state.backend.connect(&payload).await {
         Ok(_) => (StatusCode::OK, Json(serde_json::json!({ "status": "success" }))).into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,

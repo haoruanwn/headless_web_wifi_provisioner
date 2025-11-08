@@ -1,20 +1,21 @@
 // 后端：wpa_cli_TDM（时分复用调用 wpa_cli）
 // 基于之前的 wpa_cli_exclusive2 实现做了重命名并修复了 dnsmasq --address 参数。
 
-use crate::traits::{Network, PolicyCheck, TdmBackend};
+use crate::traits::{ApConfig, ConnectionRequest, Network, PolicyCheck, TdmBackend};
 use crate::{Error, Result};
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::process::{Child, Command};
+use tokio::fs;
 use std::net::{SocketAddr, Ipv4Addr};
-use std::str::FromStr;
 use tokio::sync::Mutex;
 
 const IFACE_NAME: &str = "wlan0";
-const AP_IP_ADDR: &str = "192.168.4.1/24";
+const AP_IP_ADDR: &str = "192.168.4.1/24"; // retained for initial IP logic; gateway_cidr mirrors this
 
 #[derive(Debug)]
 pub struct WpaCliTdmBackend {
+    ap_config: Arc<ApConfig>,
     // 控制 hostapd 进程的句柄
     hostapd: Arc<Mutex<Option<Child>>> ,
     dnsmasq: Arc<Mutex<Option<Child>>> ,
@@ -24,7 +25,14 @@ pub struct WpaCliTdmBackend {
 
 impl WpaCliTdmBackend {
     pub fn new() -> Result<Self> {
+        let cfg = ApConfig {
+            ssid: "ProvisionerAP".to_string(),
+            psk: "20542054".to_string(),
+            bind_addr: SocketAddr::new(Ipv4Addr::new(192, 168, 4, 1).into(), 80),
+            gateway_cidr: AP_IP_ADDR.to_string(),
+        };
         Ok(Self {
+            ap_config: Arc::new(cfg),
             hostapd: Arc::new(Mutex::new(None)),
             dnsmasq: Arc::new(Mutex::new(None)),
             last_scan: Arc::new(Mutex::new(None)),
@@ -82,7 +90,7 @@ impl WpaCliTdmBackend {
         let output = Command::new("ip")
             .arg("addr")
             .arg("add")
-            .arg(AP_IP_ADDR)
+            .arg(&self.ap_config.gateway_cidr)
             .arg("dev")
             .arg(IFACE_NAME)
             .output()
@@ -97,15 +105,21 @@ impl WpaCliTdmBackend {
             }
         }
 
-        // 启动 hostapd
+        // 动态生成 hostapd.conf 基于 ApConfig
+        let hostapd_conf = format!(
+            "interface={}\nssid={}\nwpa=2\nwpa_passphrase={}\nhw_mode=g\nchannel=6\nwpa_key_mgmt=WPA-PSK\nwpa_pairwise=CCMP\nrsn_pairwise=CCMP\n",
+            IFACE_NAME, self.ap_config.ssid, self.ap_config.psk
+        );
+        let conf_path = "/tmp/provisioner_hostapd.conf";
+        fs::write(conf_path, hostapd_conf.as_bytes()).await?;
         let child = Command::new("hostapd")
-            .arg("/etc/hostapd.conf")
+            .arg(conf_path)
             .arg("-B")
             .spawn()?;
         *self.hostapd.lock().await = Some(child);
 
         // 启动 dnsmasq
-        let ap_ip_only = AP_IP_ADDR.split('/').next().unwrap_or("");
+        let ap_ip_only = self.ap_config.gateway_cidr.split('/').next().unwrap_or("");
         let dnsmasq_child = Command::new("dnsmasq")
             .arg(format!("--interface={}", IFACE_NAME))
             .arg("--dhcp-range=192.168.4.100,192.168.4.200,12h")
@@ -132,7 +146,7 @@ impl WpaCliTdmBackend {
         let output = Command::new("ip")
             .arg("addr")
             .arg("del")
-            .arg(AP_IP_ADDR)
+            .arg(&self.ap_config.gateway_cidr)
             .arg("dev")
             .arg(IFACE_NAME)
             .output()
@@ -146,6 +160,9 @@ impl WpaCliTdmBackend {
                 )));
             }
         }
+
+        // remove temp hostapd config if present
+        let _ = fs::remove_file("/tmp/provisioner_hostapd.conf").await;
 
         // 尝试启动 wpa_supplicant（先清理可能残留的 wpa_supplicant）
         let _ = Command::new("killall")
@@ -434,10 +451,8 @@ impl PolicyCheck for WpaCliTdmBackend {
 
 #[async_trait]
 impl TdmBackend for WpaCliTdmBackend {
-    fn get_bind_address(&self) -> SocketAddr {
-        let ip_str = AP_IP_ADDR.split('/').next().unwrap_or("192.168.4.1");
-        let ip = Ipv4Addr::from_str(ip_str).unwrap_or(Ipv4Addr::new(192,168,4,1));
-        SocketAddr::new(ip.into(), 80)
+    fn get_ap_config(&self) -> ApConfig {
+        self.ap_config.as_ref().clone()
     }
     async fn enter_provisioning_mode_with_scan(&self) -> Result<Vec<Network>> {
         // reuse inherent implementation
@@ -449,8 +464,8 @@ impl TdmBackend for WpaCliTdmBackend {
         }
     }
 
-    async fn connect(&self, ssid: &str, password: &str) -> Result<()> {
-        self.connect_impl(ssid, password).await
+    async fn connect(&self, req: &ConnectionRequest) -> Result<()> {
+        self.connect_impl(&req.ssid, &req.password).await
     }
 
     async fn exit_provisioning_mode(&self) -> Result<()> {

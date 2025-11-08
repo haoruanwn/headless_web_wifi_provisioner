@@ -1,5 +1,5 @@
 use crate::Result;
-use crate::traits::{ConcurrentBackend, TdmBackend, Network, PolicyCheck};
+use crate::traits::{ApConfig, ConnectionRequest, ConcurrentBackend, TdmBackend, Network, PolicyCheck};
 use async_trait::async_trait;
 use std::time::Duration;
 use std::net::{SocketAddr, Ipv4Addr};
@@ -20,8 +20,13 @@ impl MockConcurrentBackend {
 
 #[async_trait]
 impl ConcurrentBackend for MockConcurrentBackend {
-    fn get_bind_address(&self) -> SocketAddr {
-        SocketAddr::new(Ipv4Addr::new(0, 0, 0, 0).into(), 3000)
+    fn get_ap_config(&self) -> ApConfig {
+        ApConfig {
+            ssid: "MockProvisionerAP".to_string(),
+            psk: "mock12345".to_string(),
+            bind_addr: SocketAddr::new(Ipv4Addr::new(0, 0, 0, 0).into(), 3000),
+            gateway_cidr: "0.0.0.0/24".to_string(),
+        }
     }
     async fn enter_provisioning_mode(&self) -> Result<()> {
         println!("🤖 [MockBackend] Entering provisioning mode (simulated).");
@@ -66,24 +71,24 @@ impl ConcurrentBackend for MockConcurrentBackend {
         Ok(networks)
     }
 
-    async fn connect(&self, ssid: &str, password: &str) -> Result<()> {
+    async fn connect(&self, req: &ConnectionRequest) -> Result<()> {
         println!(
             "🤖 [MockBackend] Attempting to connect to SSID: '{}' with password: '{}'",
-            ssid,
-            if password.is_empty() { "(empty)" } else { "********" }
+            req.ssid,
+            if req.password.is_empty() { "(empty)" } else { "********" }
         );
         // Simulate a connection delay
         sleep(Duration::from_secs(3)).await;
 
         // Simulate a failure for a specific network for testing purposes
-        if ssid == "xfinitywifi" {
-            println!("🤖 [MockBackend] Connection failed to '{}'", ssid);
+        if req.ssid == "xfinitywifi" {
+            println!("🤖 [MockBackend] Connection failed to '{}'", req.ssid);
             Err(crate::Error::Io(std::io::Error::new(
                 std::io::ErrorKind::ConnectionAborted,
                 "Simulated connection failure",
             )))
         } else {
-            println!("🤖 [MockBackend] Connection successful to '{}'", ssid);
+            println!("🤖 [MockBackend] Connection successful to '{}'", req.ssid);
             Ok(())
         }
     }
@@ -112,8 +117,13 @@ impl MockTdmBackend {
 
 #[async_trait]
 impl TdmBackend for MockTdmBackend {
-    fn get_bind_address(&self) -> SocketAddr {
-        SocketAddr::new(Ipv4Addr::new(0, 0, 0, 0).into(), 3000)
+    fn get_ap_config(&self) -> ApConfig {
+        ApConfig {
+            ssid: "MockTdmAP".to_string(),
+            psk: "mock12345".to_string(),
+            bind_addr: SocketAddr::new(Ipv4Addr::new(0, 0, 0, 0).into(), 3000),
+            gateway_cidr: "0.0.0.0/24".to_string(),
+        }
     }
     async fn enter_provisioning_mode_with_scan(&self) -> Result<Vec<Network>> {
         println!("🤖 [MockTdmBackend] Enter provisioning (scan then AP) simulated");
@@ -125,8 +135,8 @@ impl TdmBackend for MockTdmBackend {
         ])
     }
 
-    async fn connect(&self, ssid: &str, _password: &str) -> Result<()> {
-        println!("🤖 [MockTdmBackend] Connect (terminating) to '{}' simulated", ssid);
+    async fn connect(&self, req: &ConnectionRequest) -> Result<()> {
+        println!("🤖 [MockTdmBackend] Connect (terminating) to '{}' simulated", req.ssid);
         sleep(Duration::from_secs(1)).await;
         Ok(())
     }
