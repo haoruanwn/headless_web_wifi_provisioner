@@ -47,12 +47,7 @@ where
 
     tokio::spawn(async move {
         app_state.backend.enter_provisioning_mode().await?;
-
-    #[cfg(not(any(feature = "backend_mock_concurrent", feature = "backend_mock_TDM")))]
-        let addr = SocketAddr::from(([192, 168, 4, 1], 80));
-    #[cfg(any(feature = "backend_mock_concurrent", feature = "backend_mock_TDM"))]
-        let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
-
+        let addr = app_state.backend.get_bind_address();
         println!("🌐 Concurrent Web server listening on {}", addr);
         let listener = TcpListener::bind(addr).await?;
         axum::serve(listener, app.into_make_service()).await?;
@@ -85,7 +80,7 @@ where
             .route("/{*path}", get(serve_static_asset_tdm::<F>))
             .with_state(app_state.clone());
 
-        let addr = SocketAddr::from(([192, 168, 4, 1], 80));
+        let addr = app_state.backend.get_bind_address();
         println!("🌐 TDM Web server listening on {}", addr);
         let listener = TcpListener::bind(addr).await?;
         axum::serve(listener, app.into_make_service()).await?;

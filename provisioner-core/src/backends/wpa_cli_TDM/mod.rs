@@ -6,6 +6,8 @@ use crate::{Error, Result};
 use async_trait::async_trait;
 use std::sync::Arc;
 use tokio::process::{Child, Command};
+use std::net::{SocketAddr, Ipv4Addr};
+use std::str::FromStr;
 use tokio::sync::Mutex;
 
 const IFACE_NAME: &str = "wlan0";
@@ -432,6 +434,11 @@ impl PolicyCheck for WpaCliTdmBackend {
 
 #[async_trait]
 impl TdmBackend for WpaCliTdmBackend {
+    fn get_bind_address(&self) -> SocketAddr {
+        let ip_str = AP_IP_ADDR.split('/').next().unwrap_or("192.168.4.1");
+        let ip = Ipv4Addr::from_str(ip_str).unwrap_or(Ipv4Addr::new(192,168,4,1));
+        SocketAddr::new(ip.into(), 80)
+    }
     async fn enter_provisioning_mode_with_scan(&self) -> Result<Vec<Network>> {
         // reuse inherent implementation
         self.enter_provisioning_mode().await?;

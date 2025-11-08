@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 use serde::Serialize;
 use std::borrow::Cow;
+use std::net::SocketAddr;
 
 // 在这里定义共享的 Result 类型，和为所有后端和前端定义的 trait。
 
@@ -41,6 +42,8 @@ pub trait PolicyCheck: Send + Sync {
 /// 要求实现 PolicyCheck 接口
 #[async_trait]
 pub trait ConcurrentBackend: PolicyCheck {
+    /// 获取 Web 服务器应绑定的 Socket 地址
+    fn get_bind_address(&self) -> SocketAddr;
     /// 进入配网模式（仅启动 AP）
     async fn enter_provisioning_mode(&self) -> crate::Result<()>;
 
@@ -58,6 +61,8 @@ pub trait ConcurrentBackend: PolicyCheck {
 /// 要求实现 PolicyCheck 接口
 #[async_trait]
 pub trait TdmBackend: PolicyCheck {
+    /// 获取 Web 服务器应绑定的 Socket 地址
+    fn get_bind_address(&self) -> SocketAddr;
     /// 进入配网模式并返回启动前的扫描列表
     async fn enter_provisioning_mode_with_scan(&self) -> crate::Result<Vec<Network>>;
 

@@ -2,6 +2,7 @@ use crate::Result;
 use crate::traits::{ConcurrentBackend, TdmBackend, Network, PolicyCheck};
 use async_trait::async_trait;
 use std::time::Duration;
+use std::net::{SocketAddr, Ipv4Addr};
 use tokio::time::sleep;
 
 /// A mock backend for testing purposes.
@@ -19,6 +20,9 @@ impl MockConcurrentBackend {
 
 #[async_trait]
 impl ConcurrentBackend for MockConcurrentBackend {
+    fn get_bind_address(&self) -> SocketAddr {
+        SocketAddr::new(Ipv4Addr::new(0, 0, 0, 0).into(), 3000)
+    }
     async fn enter_provisioning_mode(&self) -> Result<()> {
         println!("🤖 [MockBackend] Entering provisioning mode (simulated).");
         Ok(())
@@ -108,6 +112,9 @@ impl MockTdmBackend {
 
 #[async_trait]
 impl TdmBackend for MockTdmBackend {
+    fn get_bind_address(&self) -> SocketAddr {
+        SocketAddr::new(Ipv4Addr::new(0, 0, 0, 0).into(), 3000)
+    }
     async fn enter_provisioning_mode_with_scan(&self) -> Result<Vec<Network>> {
         println!("🤖 [MockTdmBackend] Enter provisioning (scan then AP) simulated");
         // Simulate scan delay
