@@ -8,6 +8,7 @@ pub mod backends;
 pub mod frontends;
 pub mod web_server;
 pub mod factory;
+pub mod config; // expose config parsing utilities
 
 // Define a shared Error and Result type for the entire crate.
 

@@ -15,6 +15,8 @@ tracing.workspace = true
 async-trait.workspace = true
 anyhow = "1.0"
 log = { version = "0.4", optional = false }
+toml = "0.8"
+once_cell = "1.19"
 # DHCP implementation is in-provisioner-core backend now; no external edge-dhcp dependency
 
 # === 可选依赖 (由 Features 控制) ===
@@ -37,9 +39,11 @@ default = []
 # === 1. 后端实现选择 (仅保留三个后端) ===
 # 保留：wpa_cli_TDM (时分复用)、networkmanager_TDM、mock（拆分为 concurrent 与 TDM）
 backend_wpa_cli_TDM = []
+backend_wpa_dbus_TDM = ["dep:zbus", "dep:zbus_macros"]
 backend_mock_concurrent = ["dep:tower-http"]
 backend_mock_TDM = ["dep:tower-http"]
-backend_networkmanager_TDM = []
+backend_nmcli_TDM = []
+backend_nmdbus_TDM = ["dep:zbus", "dep:zbus_macros"]
 
 # === 2. UI 主题选择 ===
 ui_echo_mate = []

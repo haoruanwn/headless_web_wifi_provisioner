@@ -7,7 +7,6 @@ use std::borrow::Cow;
 
 // 2. Import our new modules
 use std::env;
-use std::path::PathBuf;
 use tokio::fs;
 
 // -----------------------------------------------------------------

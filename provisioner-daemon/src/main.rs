@@ -35,12 +35,24 @@ fn create_static_backend() -> anyhow::Result<BackendRunner> {
         return Ok(BackendRunner::Tdm(backend));
     }
 
-    #[cfg(feature = "backend_networkmanager_TDM")]
+    #[cfg(feature = "backend_nmcli_TDM")]
     {
-        println!("📡 Backend: NetworkManager TDM (Static Dispatch)");
-        let backend = Arc::new(
-            provisioner_core::backends::networkmanager_TDM::NetworkManagerTdmBackend::new()?,
-        );
+        println!("📡 Backend: NMCLI TDM (Static Dispatch)");
+        let backend = Arc::new(provisioner_core::backends::nmcli_TDM::NmcliTdmBackend::new()?);
+        return Ok(BackendRunner::Tdm(backend));
+    }
+
+    #[cfg(feature = "backend_nmdbus_TDM")]
+    {
+        println!("📡 Backend: NMDBUS TDM (Static Dispatch)");
+        let backend = Arc::new(provisioner_core::backends::nmdbus_tdm::NmdbusTdmBackend::new()?);
+        return Ok(BackendRunner::Tdm(backend));
+    }
+
+    #[cfg(feature = "backend_wpa_dbus_TDM")]
+    {
+        println!("📡 Backend: WPA DBUS TDM (Static Dispatch)");
+        let backend = Arc::new(provisioner_core::backends::wpa_dbus_TDM::WpaDbusTdmBackend::new()?);
         return Ok(BackendRunner::Tdm(backend));
     }
 
@@ -60,7 +72,9 @@ fn create_static_backend() -> anyhow::Result<BackendRunner> {
 
     #[cfg(not(any(
         feature = "backend_wpa_cli_TDM",
-        feature = "backend_networkmanager_TDM",
+        feature = "backend_nmcli_TDM",
+        feature = "backend_nmdbus_TDM",
+        feature = "backend_wpa_dbus_TDM",
         feature = "backend_mock_concurrent",
         feature = "backend_mock_TDM"
     )))]

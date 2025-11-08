@@ -1,0 +1,4 @@
+ap_ssid = "WPA-CLI-Provisioner"
+ap_psk = "wpacli123456"
+ap_gateway_cidr = "192.168.4.1/24"
+ap_bind_addr = "192.168.4.1:80"

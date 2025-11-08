@@ -1,0 +1,4 @@
+ap_ssid = "NMDBUS-Provisioner"
+ap_psk = "nmdbus123456"
+ap_gateway_cidr = "192.168.4.1/24"
+ap_bind_addr = "192.168.4.1:80"

@@ -8,5 +8,11 @@ pub mod mock;
 #[cfg(feature = "backend_wpa_cli_TDM")]
 pub mod wpa_cli_TDM;
 
-#[cfg(feature = "backend_networkmanager_TDM")]
-pub mod networkmanager_TDM;
+#[cfg(feature = "backend_nmcli_TDM")]
+pub mod nmcli_TDM;
+
+#[cfg(feature = "backend_nmdbus_TDM")]
+pub mod nmdbus_tdm;
+
+#[cfg(feature = "backend_wpa_dbus_TDM")]
+pub mod wpa_dbus_TDM;
