@@ -372,9 +372,8 @@ impl WpaCliTdmBackend {
                     .arg("save_config")
                     .status()
                     .await?;
-                // 成功后自动获取 DHCP（在后台运行 udhcpc），避免手动运行 `udhcpc -i wlan0`
-                let _ = Command::new("udhcpc").arg("-i").arg(IFACE_NAME).spawn();
-                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                // L2 connection successful. L3 IP address acquisition is delegated to
+                // the system's network service (systemd-networkd, NetworkManager, etc.)
                 return Ok(());
             }
             if status_str.contains("reason=WRONG_KEY") {

@@ -68,52 +68,7 @@ impl NmdbusTdmBackend {
     async fn scan_internal(&self) -> Result<Vec<Network>> {
         // Pure DBus flow: GetDevices -> pick wireless device -> RequestScan -> GetAccessPoints -> read AP properties
         let conn = self.ensure_conn().await?;
-        let nm = Proxy::new(&conn, NM_SERVICE, NM_PATH, NM_IFACE)
-            .await
-            .map_err(|e| Error::CommandFailed(format!("Proxy create error: {}", e)))?;
-
-        // GetDevices -> Vec<ObjectPath>
-        let msg = nm
-            .call_method("GetDevices", &())
-            .await
-            .map_err(|e| Error::CommandFailed(format!("GetDevices call failed: {}", e)))?;
-        let devices: Vec<OwnedObjectPath> = msg
-            .body()
-            .deserialize()
-            .map_err(|e| Error::CommandFailed(format!("GetDevices decode failed: {}", e)))?;
-
-        // Find wireless device (type == 2) and match interface name if possible
-        let mut chosen: Option<OwnedObjectPath> = None;
-        for dpath in devices {
-            let dev = Proxy::new(
-                &conn,
-                NM_SERVICE,
-                dpath.as_ref(),
-                "org.freedesktop.NetworkManager.Device",
-            )
-            .await
-            .map_err(|e| Error::CommandFailed(format!("Device proxy error: {}", e)))?;
-            let dtype: u32 = dev
-                .get_property::<u32>("DeviceType")
-                .await
-                .map_err(|e| Error::CommandFailed(format!("Get DeviceType failed: {}", e)))?;
-            if dtype != 2 {
-                continue;
-            }
-            let ifname: String = dev
-                .get_property::<String>("Interface")
-                .await
-                .map_err(|e| Error::CommandFailed(format!("Get Interface failed: {}", e)))?;
-            if ifname == IFACE_NAME {
-                chosen = Some(dpath.clone());
-                break;
-            }
-            if chosen.is_none() {
-                chosen = Some(dpath.clone());
-            }
-        }
-        let dpath =
-            chosen.ok_or_else(|| Error::CommandFailed("No wireless device found".into()))?;
+        let dpath = self.get_wifi_device_path().await?;
 
         // Wireless-specific proxy
         let wifi = Proxy::new(

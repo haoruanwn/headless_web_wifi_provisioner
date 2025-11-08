@@ -164,19 +164,46 @@ impl WpaDbusTdmBackend {
             )
             .await
             .map_err(|e| Error::CommandFailed(format!("BSS proxy error: {}", e)))?;
-            let ssid_bytes = bss
-                .get_property::<Vec<u8>>("SSID")
-                .await
-                .unwrap_or_default();
+            
+            // Get SSID - skip this BSS if we can't get it
+            let ssid_bytes = match bss.get_property::<Vec<u8>>("SSID").await {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    tracing::warn!("Failed to get SSID for BSS {:?}: {}", bss_path, e);
+                    continue;
+                }
+            };
+            
             if ssid_bytes.is_empty() {
                 continue;
             }
-            let signal_dbm: i16 = bss.get_property::<i16>("Signal").await.unwrap_or(-100);
-            // Determine security from WPA/RSN presence
-            let wpa: HashMap<String, OwnedValue> =
-                bss.get_property("WPA").await.unwrap_or_default();
-            let rsn: HashMap<String, OwnedValue> =
-                bss.get_property("RSN").await.unwrap_or_default();
+            
+            // Get Signal strength - use a default if unavailable but log a warning
+            let signal_dbm: i16 = match bss.get_property::<i16>("Signal").await {
+                Ok(sig) => sig,
+                Err(e) => {
+                    tracing::warn!("Failed to get Signal for BSS {:?}: {}, using default -100", bss_path, e);
+                    -100
+                }
+            };
+            
+            // Determine security from WPA/RSN presence - use defaults if unavailable
+            let wpa: HashMap<String, OwnedValue> = match bss.get_property("WPA").await {
+                Ok(w) => w,
+                Err(e) => {
+                    tracing::debug!("Failed to get WPA for BSS {:?}: {}", bss_path, e);
+                    HashMap::new()
+                }
+            };
+            
+            let rsn: HashMap<String, OwnedValue> = match bss.get_property("RSN").await {
+                Ok(r) => r,
+                Err(e) => {
+                    tracing::debug!("Failed to get RSN for BSS {:?}: {}", bss_path, e);
+                    HashMap::new()
+                }
+            };
+            
             let security = if !rsn.is_empty() {
                 "WPA2".to_string()
             } else if !wpa.is_empty() {
@@ -184,6 +211,7 @@ impl WpaDbusTdmBackend {
             } else {
                 "Open".to_string()
             };
+            
             let ssid = String::from_utf8(ssid_bytes.clone())
                 .unwrap_or_else(|_| format!("{:X?}", ssid_bytes));
             let signal_percent = ((signal_dbm.clamp(-100, -50) + 100) * 2) as u8;
@@ -332,8 +360,8 @@ impl WpaDbusTdmBackend {
                             if let Some(state) = changed_props.get("State") {
                                 if let Ok(state_str) = <&str>::try_from(state) {
                                     if state_str == "completed" {
-                                        let _ = Command::new("udhcpc").arg("-i").arg(IFACE_NAME).spawn();
-                                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                                        // Connection successful. L3 IP address acquisition is delegated to
+                                        // the system's network service (systemd-networkd, NetworkManager, etc.)
                                         return Ok(());
                                     }
                                 }
