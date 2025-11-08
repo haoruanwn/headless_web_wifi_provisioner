@@ -1,4 +1,4 @@
-use provisioner_core::traits::{UiAssetProvider, ProvisioningTerminator, TdmBackend, ConcurrentBackend};
+use provisioner_core::traits::{UiAssetProvider, PolicyCheck, TdmBackend, ConcurrentBackend};
 use std::sync::Arc;
 use crate::runner::BackendRunner; // Import the Enum
 
@@ -27,7 +27,7 @@ fn create_static_frontend() -> Arc<impl UiAssetProvider + 'static> {
 //    - policy_backend: For the policy layer (needs is_connected)
 //    - runner_backend: For the execution layer (needs TDM/Concurrent specifics)
 fn create_static_backend() -> anyhow::Result<(
-    Arc<dyn ProvisioningTerminator + Send + Sync + 'static>,
+    Arc<dyn PolicyCheck + Send + Sync + 'static>,
     BackendRunner,
 )> {
     

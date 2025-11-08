@@ -1,5 +1,5 @@
 use crate::Result;
-use crate::traits::{ConcurrentBackend, Network, ProvisioningTerminator};
+use crate::traits::{ConcurrentBackend, Network, PolicyCheck};
 use async_trait::async_trait;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -62,11 +62,50 @@ impl ConcurrentBackend for MockBackend {
 }
 
 #[async_trait]
-impl ProvisioningTerminator for MockBackend {
-    async fn is_connected(&self) -> crate::Result<bool> {
-        println!("👻 [MockBackend] Checking connection status (simulated, returning false)");
-        Ok(false)
+impl ConcurrentBackend for MockBackend {
+    async fn enter_provisioning_mode(&self) -> Result<()> {
+        println!("🤖 [MockBackend] Entering provisioning mode (simulated).");
+        Ok(())
     }
+
+    async fn scan(&self) -> Result<Vec<Network>> {
+        println!("🤖 [MockBackend] Scanning for networks...");
+        // Simulate a delay
+        sleep(Duration::from_secs(2)).await;
+
+        // Return a fixed list of fake networks
+        let networks = vec![
+            Network {
+                ssid: "MyHomeWiFi".to_string(),
+                signal: 95,
+                security: "WPA3".to_string(),
+            },
+            Network {
+                ssid: "CafeGuest".to_string(),
+                signal: 78,
+                security: "Open".to_string(),
+            },
+            Network {
+                ssid: "Neighbor's Network".to_string(),
+                signal: 55,
+                security: "WPA2".to_string(),
+            },
+            Network {
+                ssid: "xfinitywifi".to_string(),
+                signal: 88,
+                security: "WPA2".to_string(),
+            },
+            Network {
+                ssid: "HiddenNetwork".to_string(),
+                signal: 42,
+                security: "WPA2".to_string(),
+            },
+        ];
+
+        println!("🤖 [MockBackend] Found {} networks.", networks.len());
+        Ok(networks)
+    }
+
     async fn connect(&self, ssid: &str, password: &str) -> Result<()> {
         println!(
             "🤖 [MockBackend] Attempting to connect to SSID: '{}' with password: '{}'",
@@ -92,5 +131,13 @@ impl ProvisioningTerminator for MockBackend {
     async fn exit_provisioning_mode(&self) -> Result<()> {
         println!("🤖 [MockBackend] Exiting provisioning mode (simulated).");
         Ok(())
+    }
+}
+
+#[async_trait]
+impl PolicyCheck for MockBackend {
+    async fn is_connected(&self) -> crate::Result<bool> {
+        println!("👻 [MockBackend] Checking connection status (simulated, returning false)");
+        Ok(false)
     }
 }

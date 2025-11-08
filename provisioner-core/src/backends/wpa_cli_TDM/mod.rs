@@ -1,7 +1,7 @@
 // 后端：wpa_cli_TDM（时分复用调用 wpa_cli）
 // 基于之前的 wpa_cli_exclusive2 实现做了重命名并修复了 dnsmasq --address 参数。
 
-use crate::traits::{Network, ProvisioningTerminator, TdmBackend};
+use crate::traits::{Network, PolicyCheck, TdmBackend};
 use crate::{Error, Result};
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -400,7 +400,7 @@ impl WpaCliTdmBackend {
 }
 
 #[async_trait]
-impl ProvisioningTerminator for WpaCliTdmBackend {
+impl PolicyCheck for WpaCliTdmBackend {
     async fn is_connected(&self) -> Result<bool> {
         println!("📡 [WpaCliTDM] Checking connection status via wpa_cli...");
         let output = Command::new("wpa_cli")
@@ -428,13 +428,6 @@ impl ProvisioningTerminator for WpaCliTdmBackend {
             }
         }
     }
-    async fn connect(&self, ssid: &str, password: &str) -> Result<()> {
-        self.connect_impl(ssid, password).await
-    }
-
-    async fn exit_provisioning_mode(&self) -> Result<()> {
-        self.exit_provisioning_mode_impl().await
-    }
 }
 
 #[async_trait]
@@ -447,5 +440,13 @@ impl TdmBackend for WpaCliTdmBackend {
         } else {
             Err(Error::CommandFailed("Initial scan yielded no networks".into()))
         }
+    }
+
+    async fn connect(&self, ssid: &str, password: &str) -> Result<()> {
+        self.connect_impl(ssid, password).await
+    }
+
+    async fn exit_provisioning_mode(&self) -> Result<()> {
+        self.exit_provisioning_mode_impl().await
     }
 }

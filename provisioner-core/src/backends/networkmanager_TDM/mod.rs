@@ -3,7 +3,7 @@
 // This is intentionally conservative and best-effort; it mirrors the WpaCli TDM
 // behaviour but uses NetworkManager where available.
 
-use crate::traits::{Network, ProvisioningTerminator, TdmBackend};
+use crate::traits::{Network, PolicyCheck, TdmBackend};
 use crate::{Error, Result};
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -363,7 +363,7 @@ impl NetworkManagerTdmBackend {
 }
 
 #[async_trait]
-impl ProvisioningTerminator for NetworkManagerTdmBackend {
+impl PolicyCheck for NetworkManagerTdmBackend {
     async fn is_connected(&self) -> Result<bool> {
         // Use `nmcli -t -f STATE general` which usually prints e.g. "connected" or "disconnected"
         match Command::new("nmcli")
@@ -384,6 +384,13 @@ impl ProvisioningTerminator for NetworkManagerTdmBackend {
             Err(_) => Ok(false),
         }
     }
+}
+
+#[async_trait]
+impl TdmBackend for NetworkManagerTdmBackend {
+    async fn enter_provisioning_mode_with_scan(&self) -> Result<Vec<Network>> {
+        self.enter_provisioning_mode_with_scan_impl().await
+    }
 
     async fn connect(&self, ssid: &str, password: &str) -> Result<()> {
         self.connect_impl(ssid, password).await
@@ -391,12 +398,5 @@ impl ProvisioningTerminator for NetworkManagerTdmBackend {
 
     async fn exit_provisioning_mode(&self) -> Result<()> {
         self.stop_ap().await
-    }
-}
-
-#[async_trait]
-impl TdmBackend for NetworkManagerTdmBackend {
-    async fn enter_provisioning_mode_with_scan(&self) -> Result<Vec<Network>> {
-        self.enter_provisioning_mode_with_scan_impl().await
     }
 }

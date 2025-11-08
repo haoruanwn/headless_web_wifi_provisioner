@@ -1,4 +1,4 @@
-use provisioner_core::traits::{UiAssetProvider, ProvisioningTerminator};
+use provisioner_core::traits::{UiAssetProvider, PolicyCheck};
 use std::sync::Arc;
 use crate::runner::BackendRunner; // Import BackendRunner
 
@@ -8,7 +8,7 @@ pub mod daemon_if_disconnected;
 // Remove all cfg blocks!
 pub async fn dispatch<F>(
     frontend: Arc<F>,
-    policy_backend: Arc<dyn ProvisioningTerminator + Send + Sync + 'static>,
+    policy_backend: Arc<dyn PolicyCheck + Send + Sync + 'static>,
     runner_backend: BackendRunner,
 ) -> anyhow::Result<()>
 where

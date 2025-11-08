@@ -1,6 +1,6 @@
 use provisioner_core::{
     web_server,
-    traits::{UiAssetProvider, TdmBackend, ConcurrentBackend, ProvisioningTerminator},
+    traits::{UiAssetProvider, TdmBackend, ConcurrentBackend},
 };
 use std::sync::Arc;
 

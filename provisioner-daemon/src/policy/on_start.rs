@@ -1,11 +1,11 @@
-use provisioner_core::traits::{ProvisioningTerminator, UiAssetProvider};
+use provisioner_core::traits::{PolicyCheck, UiAssetProvider};
 use std::sync::Arc;
 use crate::runner::BackendRunner; // Import BackendRunner
 
 // Remove all cfg blocks!
 pub async fn run<F>(
     frontend: Arc<F>,
-    _policy_backend: Arc<dyn ProvisioningTerminator + Send + Sync + 'static>, // Receive but not use
+    _policy_backend: Arc<dyn PolicyCheck + Send + Sync + 'static>, // Receive but not use
     runner_backend: BackendRunner,
 ) -> anyhow::Result<()>
 where

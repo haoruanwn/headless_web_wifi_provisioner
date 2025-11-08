@@ -1,4 +1,4 @@
-use crate::traits::{ConcurrentBackend, ProvisioningTerminator, TdmBackend, UiAssetProvider};
+use crate::traits::{ConcurrentBackend, TdmBackend, UiAssetProvider};
 use axum::body::Body;
 use axum::{
     Json, Router,

@@ -1,4 +1,4 @@
-use provisioner_core::traits::{ProvisioningTerminator, UiAssetProvider};
+use provisioner_core::traits::{PolicyCheck, UiAssetProvider};
 use std::sync::Arc;
 use crate::runner::BackendRunner; // Import BackendRunner
 
@@ -6,7 +6,7 @@ use crate::runner::BackendRunner; // Import BackendRunner
 #[allow(dead_code)]
 pub async fn run<F>(
     frontend: Arc<F>,
-    policy_backend: Arc<dyn ProvisioningTerminator + Send + Sync + 'static>,
+    policy_backend: Arc<dyn PolicyCheck + Send + Sync + 'static>,
     runner_backend: BackendRunner,
 ) -> anyhow::Result<()>
 where
