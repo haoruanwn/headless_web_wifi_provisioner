@@ -32,7 +32,7 @@ impl NmcliTdmBackend {
 
     /// 启动 AP（使用 `connection add` 以便指定 IP）
     async fn start_ap(&self) -> Result<()> {
-        const AP_CONNECTION_NAME: &str = "ProvisionerAP";
+        let ap_connection_name = &self.ap_config.ssid;
 
         let add_output = Command::new("nmcli")
             .arg("connection")
@@ -42,7 +42,7 @@ impl NmcliTdmBackend {
             .arg("ifname")
             .arg(IFACE_NAME)
             .arg("con-name")
-            .arg(AP_CONNECTION_NAME)
+            .arg(ap_connection_name)
             .arg("autoconnect")
             .arg("no")
             .arg("ssid")
@@ -73,7 +73,7 @@ impl NmcliTdmBackend {
         let up_output = Command::new("nmcli")
             .arg("connection")
             .arg("up")
-            .arg(AP_CONNECTION_NAME)
+            .arg(ap_connection_name)
             .output()
             .await?;
 
@@ -85,7 +85,7 @@ impl NmcliTdmBackend {
             )));
         }
 
-        *self.hotspot_name.lock().await = Some(AP_CONNECTION_NAME.to_string());
+        *self.hotspot_name.lock().await = Some(ap_connection_name.to_string());
         Ok(())
     }
 

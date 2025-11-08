@@ -19,7 +19,6 @@ provisioner-core = { path = "../provisioner-core", default-features = false }
 backend_mock_concurrent = ["provisioner-core/backend_mock_concurrent"]
 backend_mock_TDM = ["provisioner-core/backend_mock_TDM"]
 backend_wpa_cli_TDM = ["provisioner-core/backend_wpa_cli_TDM"]
-backend_networkmanager_TDM = ["provisioner-core/backend_nmcli_TDM"]
 backend_nmcli_TDM = ["provisioner-core/backend_nmcli_TDM"]
 backend_nmdbus_TDM = ["provisioner-core/backend_nmdbus_TDM"]
 backend_wpa_dbus_TDM = ["provisioner-core/backend_wpa_dbus_TDM"]

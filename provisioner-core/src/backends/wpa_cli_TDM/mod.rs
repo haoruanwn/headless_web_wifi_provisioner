@@ -1,17 +1,22 @@
 // 后端：wpa_cli_TDM（时分复用调用 wpa_cli）
 // 基于之前的 wpa_cli_exclusive2 实现做了重命名并修复了 dnsmasq --address 参数。
 
+use crate::config::ap_config_from_toml_str;
 use crate::traits::{ApConfig, ConnectionRequest, Network, PolicyCheck, TdmBackend};
 use crate::{Error, Result};
 use async_trait::async_trait;
-use std::net::{Ipv4Addr, SocketAddr};
+use once_cell::sync::Lazy;
 use std::sync::Arc;
 use tokio::fs;
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
+static GLOBAL_AP_CONFIG: Lazy<ApConfig> = Lazy::new(|| {
+    const CONFIG_TOML: &str = include_str!("../../../../configs/wpa_cli_tdm.toml");
+    ap_config_from_toml_str(CONFIG_TOML)
+});
+
 const IFACE_NAME: &str = "wlan0";
-const AP_IP_ADDR: &str = "192.168.4.1/24"; // retained for initial IP logic; gateway_cidr mirrors this
 
 #[derive(Debug)]
 pub struct WpaCliTdmBackend {
@@ -25,14 +30,8 @@ pub struct WpaCliTdmBackend {
 
 impl WpaCliTdmBackend {
     pub fn new() -> Result<Self> {
-        let cfg = ApConfig {
-            ssid: "ProvisionerAP".to_string(),
-            psk: "20542054".to_string(),
-            bind_addr: SocketAddr::new(Ipv4Addr::new(192, 168, 4, 1).into(), 80),
-            gateway_cidr: AP_IP_ADDR.to_string(),
-        };
         Ok(Self {
-            ap_config: Arc::new(cfg),
+            ap_config: Arc::new(GLOBAL_AP_CONFIG.clone()),
             hostapd: Arc::new(Mutex::new(None)),
             dnsmasq: Arc::new(Mutex::new(None)),
             last_scan: Arc::new(Mutex::new(None)),

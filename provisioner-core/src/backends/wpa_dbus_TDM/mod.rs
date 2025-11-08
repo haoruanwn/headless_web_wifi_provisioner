@@ -11,6 +11,7 @@ use tokio::process::Command;
 use tokio::sync::Mutex;
 use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 use zbus::{Connection, Proxy};
+use futures_util::stream::StreamExt;
 
 // MVP DBus backend for wpa_supplicant + external hostapd/dnsmasq for AP mode.
 // Station operations (scan/connect) will use DBus where feasible; fallback to wpa_cli textual parsing for now.
@@ -118,14 +119,35 @@ impl WpaDbusTdmBackend {
         )
         .await
         .map_err(|e| Error::CommandFailed(format!("iface proxy error: {}", e)))?;
+
+        let mut scan_done_stream = iface
+            .receive_signal("ScanDone")
+            .await
+            .map_err(|e| Error::CommandFailed(format!("Failed to listen for ScanDone: {}", e)))?;
+
         // Trigger scan: Scan(a{sv}) with empty options
         let opts: HashMap<String, OwnedValue> = HashMap::new();
-        let _ = iface
+        iface
             .call_method("Scan", &(opts))
             .await
             .map_err(|e| Error::CommandFailed(format!("Scan failed: {}", e)))?;
-        // Wait briefly; can be improved by listening to signals
-        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+
+        let fut = async {
+            if let Some(signal) = scan_done_stream.next().await {
+                let (success,): (bool,) = signal.body().deserialize().map_err(|e| Error::CommandFailed(format!("Invalid ScanDone body: {}", e)))?;
+                if success {
+                    return Ok(());
+                }
+            }
+            Err(Error::CommandFailed("ScanDone signal not received or scan failed".into()))
+        };
+
+        match tokio::time::timeout(std::time::Duration::from_secs(15), fut).await {
+            Ok(Ok(_)) => (),
+            Ok(Err(e)) => return Err(e),
+            Err(_) => return Err(Error::CommandFailed("Scan timed out".into())),
+        }
+
         // Read BSS list
         let bss_paths: Vec<OwnedObjectPath> = iface
             .get_property::<Vec<OwnedObjectPath>>("BSSs")
@@ -295,28 +317,49 @@ impl WpaDbusTdmBackend {
             .await
             .map_err(|e| Error::CommandFailed(format!("SelectNetwork failed: {}", e)))?;
 
-        // Poll interface state
-        for _ in 0..30 {
-            let state: String = iface
-                .get_property("State")
-                .await
-                .unwrap_or_else(|_| "disconnected".to_string());
-            if state.to_lowercase() == "completed" {
-                let _ = Command::new("udhcpc").arg("-i").arg(IFACE_NAME).spawn();
-                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                return Ok(());
-            }
-            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-        }
+        let mut props_stream = iface
+            .receive_signal("PropertiesChanged")
+            .await
+            .map_err(|e| Error::CommandFailed(format!("Failed to listen for PropertiesChanged: {}", e)))?;
 
-        // Timeout: clean network and restore AP list
-        let _ = iface
-            .call_method("RemoveNetwork", &(net_path.as_ref(),))
-            .await;
-        let networks = self.scan_internal().await.unwrap_or_default();
-        *self.last_scan.lock().await = Some(networks);
-        let _ = self.start_ap().await;
-        Err(Error::CommandFailed("Connection timed out".into()))
+        let fut = async {
+            while let Some(signal) = props_stream.next().await {
+                match signal
+                    .body().deserialize::<(String, HashMap<String, Value>, Vec<String>)>()
+                {
+                    Ok((iface_name, changed_props, _invalidated_props)) => {
+                        if iface_name == "fi.w1.wpa_supplicant1.Interface" {
+                            if let Some(state) = changed_props.get("State") {
+                                if let Ok(state_str) = <&str>::try_from(state) {
+                                    if state_str == "completed" {
+                                        let _ = Command::new("udhcpc").arg("-i").arg(IFACE_NAME).spawn();
+                                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                                        return Ok(());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        return Err(Error::CommandFailed(format!("Invalid PropertiesChanged body: {}", e)));
+                    }
+                }
+            }
+            Err(Error::CommandFailed("PropertiesChanged stream ended unexpectedly".into()))
+        };
+
+        match tokio::time::timeout(std::time::Duration::from_secs(30), fut).await {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err(e)) => Err(e),
+            Err(_) => {
+                // Timeout: clean network and restore AP list
+                let _ = iface.call_method("RemoveNetwork", &(net_path.as_ref(),)).await;
+                let networks = self.scan_internal().await.unwrap_or_default();
+                *self.last_scan.lock().await = Some(networks);
+                let _ = self.start_ap().await;
+                Err(Error::CommandFailed("Connection timed out".into()))
+            }
+        }
     }
 }
 

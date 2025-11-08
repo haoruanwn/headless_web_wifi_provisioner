@@ -34,11 +34,11 @@ default = []
 
 # === 1. 后端实现选择 ===
 backend_wpa_cli_TDM = []
-backend_wpa_dbus_TDM = ["dep:zbus", "dep:zbus_macros"]
+backend_wpa_dbus_TDM = ["dep:zbus", "dep:zbus_macros", "dep:futures-util"]
 backend_mock_concurrent = ["dep:tower-http"]
 backend_mock_TDM = ["dep:tower-http"]
 backend_nmcli_TDM = []
-backend_nmdbus_TDM = ["dep:zbus", "dep:zbus_macros"]
+backend_nmdbus_TDM = ["dep:zbus", "dep:zbus_macros", "dep:futures-util"]
 
 # === 2. UI 主题选择 ===
 ui_echo_mate = []

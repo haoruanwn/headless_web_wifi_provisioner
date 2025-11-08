@@ -9,6 +9,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use zbus::zvariant::{ObjectPath, OwnedObjectPath, OwnedValue, Value};
 use zbus::{Connection, Proxy};
+use zbus::proxy::SignalStream;
+use futures_util::stream::StreamExt;
 
 // This backend is a stub showcasing DBus interaction with NetworkManager for scanning & connecting.
 // AP mode still leverages nmcli commands for simplicity; later we can move those to pure D-Bus calls.
@@ -123,15 +125,26 @@ impl NmdbusTdmBackend {
         .await
         .map_err(|e| Error::CommandFailed(format!("Wireless proxy error: {}", e)))?;
 
+        let mut scan_done_stream = wifi
+            .receive_signal("ScanDone")
+            .await
+            .map_err(|e| Error::CommandFailed(format!("Failed to listen for ScanDone: {}", e)))?;
+
         // RequestScan with empty options
         let opts: HashMap<String, OwnedValue> = HashMap::new();
-        let _ = wifi
+        wifi
             .call_method("RequestScan", &(opts))
             .await
             .map_err(|e| Error::CommandFailed(format!("RequestScan failed: {}", e)))?;
 
-        // Wait a short while for scan to complete (alternatively poll LastScan)
-        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+        let fut = async {
+            scan_done_stream.next().await;
+            Ok::<(), Error>(())
+        };
+
+        if let Err(_) = tokio::time::timeout(std::time::Duration::from_secs(15), fut).await {
+            return Err(Error::CommandFailed("Scan timed out".into()));
+        }
 
         // GetAccessPoints -> Vec<ObjectPath>
         let msg = wifi
@@ -253,7 +266,7 @@ impl NmdbusTdmBackend {
 
         // connection setting
         let mut s_connection: HashMap<String, OwnedValue> = HashMap::new();
-        s_connection.insert("id".into(), Self::ov("ProvisionerAP"));
+        s_connection.insert("id".into(), Self::ov(self.ap_config.ssid.clone()));
         s_connection.insert("type".into(), Self::ov("802-11-wireless"));
         s_connection.insert("autoconnect".into(), Self::ov(false));
         s_connection.insert("interface-name".into(), Self::ov(IFACE_NAME));
@@ -395,36 +408,61 @@ impl NmdbusTdmBackend {
             )
             .await
             .map_err(|e| Error::CommandFailed(format!("AddAndActivateConnection failed: {}", e)))?;
-        let (_con_path, _ac_path, _dev_path): (OwnedObjectPath, OwnedObjectPath, OwnedObjectPath) =
+        let (_con_path, ac_path, _dev_path): (OwnedObjectPath, OwnedObjectPath, OwnedObjectPath) =
             reply
                 .body()
                 .deserialize()
                 .map_err(|e| Error::CommandFailed(format!("AddAndActivate decode failed: {}", e)))?;
-        Ok(())
+        
+        let ac_proxy = Proxy::new(
+            &conn,
+            NM_SERVICE,
+            ac_path.as_ref(),
+            "org.freedesktop.NetworkManager.Connection.Active",
+        )
+        .await
+        .map_err(|e| Error::CommandFailed(format!("Active connection proxy error: {}", e)))?;
+
+        let mut state_stream = ac_proxy
+            .receive_signal("StateChanged")
+            .await
+            .map_err(|e| Error::CommandFailed(format!("Failed to listen for StateChanged: {}", e)))?;
+
+        let fut = async {
+            while let Some(signal) = state_stream.next().await {
+                let (state, _reason): (u32, u32) = signal
+                    .body()
+                    .deserialize()
+                    .map_err(|e| Error::CommandFailed(format!("Invalid StateChanged body: {}", e)))?;
+                match state {
+                    2 => return Ok(()), // NM_ACTIVE_CONNECTION_STATE_ACTIVATED
+                    4 => return Err(Error::CommandFailed("Connection failed (deactivated)".into())),
+                    _ => continue,
+                }
+            }
+            Err(Error::CommandFailed("Connection state stream ended unexpectedly".into()))
+        };
+
+        match tokio::time::timeout(std::time::Duration::from_secs(30), fut).await {
+            Ok(Ok(_)) => Ok(()),
+            Ok(Err(e)) => Err(e),
+            Err(_) => Err(Error::CommandFailed("Connection timed out".into())),
+        }
     }
 }
 
 #[async_trait]
 impl PolicyCheck for NmdbusTdmBackend {
     async fn is_connected(&self) -> Result<bool> {
-        // Simplistic check: use nmcli general (could use DBus state property later)
-        match tokio::process::Command::new("nmcli")
-            .arg("-t")
-            .arg("-f")
-            .arg("STATE")
-            .arg("general")
-            .output()
+        let conn = self.ensure_conn().await?;
+        let nm = Proxy::new(&conn, NM_SERVICE, NM_PATH, NM_IFACE)
             .await
-        {
-            Ok(out) => {
-                if !out.status.success() {
-                    return Ok(false);
-                }
-                let s = String::from_utf8_lossy(&out.stdout).to_lowercase();
-                Ok(s.contains("connected"))
-            }
-            Err(_) => Ok(false),
-        }
+            .map_err(|e| Error::CommandFailed(format!("Proxy create error: {}", e)))?;
+        let state: u32 = nm
+            .get_property("State")
+            .await
+            .map_err(|e| Error::CommandFailed(format!("Failed to get NM state: {}", e)))?;
+        Ok(state == 70) // NM_STATE_CONNECTED
     }
 }
 
