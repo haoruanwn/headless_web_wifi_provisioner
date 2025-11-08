@@ -1,13 +1,14 @@
-use provisioner_core::traits::{UiAssetProvider, PolicyCheck, TdmBackend, ConcurrentBackend};
-use std::sync::Arc;
-use crate::runner::BackendRunner; // Import the Enum
+use crate::runner::BackendRunner;
+use provisioner_core::traits::{ConcurrentBackend, PolicyCheck, TdmBackend, UiAssetProvider};
+use std::sync::Arc; // Import the Enum
 
-mod runner;
 mod policy;
+mod runner;
 
 // create_static_frontend() remains unchanged
 fn create_static_frontend() -> Arc<impl UiAssetProvider + 'static> {
-    const UI_THEME_COUNT: usize = cfg!(feature = "ui_echo_mate") as usize + cfg!(feature = "ui_radxa_x4") as usize;
+    const UI_THEME_COUNT: usize =
+        cfg!(feature = "ui_echo_mate") as usize + cfg!(feature = "ui_radxa_x4") as usize;
     const _: () = assert!(UI_THEME_COUNT == 1, "Select exactly ONE UI theme.");
     let _ = UI_THEME_COUNT;
 
@@ -52,7 +53,7 @@ fn create_static_backend() -> anyhow::Result<BackendRunner> {
     #[cfg(feature = "backend_wpa_dbus_TDM")]
     {
         println!("📡 Backend: WPA DBUS TDM (Static Dispatch)");
-        let backend = Arc::new(provisioner_core::backends::wpa_dbus_TDM::WpaDbusTdmBackend::new()?);
+        let backend = Arc::new(provisioner_core::backends::wpa_dbus_tdm::WpaDbusTdmBackend::new()?);
         return Ok(BackendRunner::Tdm(backend));
     }
 
@@ -87,7 +88,7 @@ async fn main() -> anyhow::Result<()> {
     println!("🚀 Starting provisioner-daemon...");
 
     let frontend = create_static_frontend();
-    
+
     // 2. Create and destructure the two trait objects
     let runner_backend = create_static_backend()?;
     // 由 policy::dispatch 自行根据 BackendRunner 抽取 PolicyCheck

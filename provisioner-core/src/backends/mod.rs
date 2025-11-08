@@ -15,4 +15,4 @@ pub mod nmcli_TDM;
 pub mod nmdbus_tdm;
 
 #[cfg(feature = "backend_wpa_dbus_TDM")]
-pub mod wpa_dbus_TDM;
+pub mod wpa_dbus_tdm;

@@ -6,9 +6,9 @@
 use crate::traits::{ApConfig, ConnectionRequest, Network, PolicyCheck, TdmBackend};
 use crate::{Error, Result};
 use async_trait::async_trait;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use tokio::process::Command;
-use std::net::{SocketAddr, Ipv4Addr};
 use tokio::sync::Mutex;
 
 const IFACE_NAME: &str = "wlan0";
@@ -225,9 +225,9 @@ impl NetworkManagerTdmBackend {
                 for line in stdout.lines() {
                     let parts: Vec<&str> = line.split(':').collect();
                     if parts.len() >= 3 {
-                        let name = parts[0];   // e.g., "Xiaomi 14"
+                        let name = parts[0]; // e.g., "Xiaomi 14"
                         let device = parts[1]; // e.g., "wlan0"
-                        let state = parts[2];  // e.g., "activated"
+                        let state = parts[2]; // e.g., "activated"
 
                         // 检查 激活的连接名 是否等于 目标SSID，
                         // 并且它是否在 wlan0 上，并且状态是 "activated"
@@ -283,13 +283,13 @@ impl NetworkManagerTdmBackend {
             .arg("device")
             .arg("wifi")
             .arg("rescan") // <-- 命令 NM 重新扫描
-            .status()      // <-- 等待 rescan 命令 *本身* 退出 (这很快)
+            .status() // <-- 等待 rescan 命令 *本身* 退出 (这很快)
             .await;
-            
+
         if rescan_status.is_err() {
-             println!("📡 [NetworkManagerTDM] 'nmcli rescan' command failed to start.");
+            println!("📡 [NetworkManagerTDM] 'nmcli rescan' command failed to start.");
         }
-        
+
         // **关键**：给 NetworkManager 几秒钟时间来实际完成扫描并更新其内部缓存
         // (这个延迟是必要的，模拟了 wpa_cli_TDM 的 sleep)
         tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
@@ -299,7 +299,10 @@ impl NetworkManagerTdmBackend {
         // -----------------------------------------------------------------
 
         // 3. 异步 Spawn 连接命令
-        println!("📡 [NetworkManagerTDM] Spawning connect command for '{}'...", ssid);
+        println!(
+            "📡 [NetworkManagerTDM] Spawning connect command for '{}'...",
+            ssid
+        );
         let connect_cmd = if password.is_empty() {
             Command::new("nmcli")
                 .arg("device")
@@ -320,27 +323,45 @@ impl NetworkManagerTdmBackend {
 
         // 检查 spawn 是否成功
         if let Err(e) = connect_cmd {
-            println!("📡 [NetworkManagerTDM] Failed to spawn nmcli connect: {}", e);
+            println!(
+                "📡 [NetworkManagerTDM] Failed to spawn nmcli connect: {}",
+                e
+            );
             let _ = self.start_ap().await; // 恢复 AP
             return Err(Error::Io(e));
         }
 
         // 4. 使用新的、更精确的轮询函数检查是否连接到指定 SSID
-        println!("📡 [NetworkManagerTDM] Polling for connection to '{}'...", ssid);
+        println!(
+            "📡 [NetworkManagerTDM] Polling for connection to '{}'...",
+            ssid
+        );
         for i in 0..20 {
-            println!("📡 [NetworkManagerTDM] Polling... (Attempt {}/{})", i + 1, 20);
+            println!(
+                "📡 [NetworkManagerTDM] Polling... (Attempt {}/{})",
+                i + 1,
+                20
+            );
             if let Ok(true) = Self::check_connected_to_ssid(ssid).await {
-                println!("📡 [NetworkManagerTDM] Connection to '{}' successful.", ssid);
+                println!(
+                    "📡 [NetworkManagerTDM] Connection to '{}' successful.",
+                    ssid
+                );
                 return Ok(());
             }
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         }
 
         // 5. 连接超时，恢复 AP 模式并返回错误
-        println!("📡 [NetworkManagerTDM] Connection to '{}' timed out, restoring AP...", ssid);
+        println!(
+            "📡 [NetworkManagerTDM] Connection to '{}' timed out, restoring AP...",
+            ssid
+        );
         let _ = self.start_ap().await; // 恢复 AP
 
-        Err(Error::CommandFailed(format!("Connection to '{}' timed out (20s)", ssid).into()))
+        Err(Error::CommandFailed(
+            format!("Connection to '{}' timed out (20s)", ssid).into(),
+        ))
     }
 
     async fn enter_provisioning_mode_impl(&self) -> Result<()> {

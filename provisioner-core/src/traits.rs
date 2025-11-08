@@ -10,7 +10,7 @@ use std::net::SocketAddr;
 #[derive(Debug, Clone, Serialize)]
 pub struct Network {
     pub ssid: String,
-    pub signal: u8, // 信号强度，0到100
+    pub signal: u8,       // 信号强度，0到100
     pub security: String, // 无线网络安全性 "WPA2", "WEP", "Open"
 }
 

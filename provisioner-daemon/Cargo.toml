@@ -29,7 +29,7 @@ backend_wpa_dbus_TDM = ["provisioner-core/backend_wpa_dbus_TDM"]
 ui_echo_mate = ["provisioner-core/ui_echo_mate"]
 ui_radxa_x4 = ["provisioner-core/ui_radxa_x4"]
 
-# --- Policy（启动策略） ---
+
 # policy_on_start: 启动时始终进入配网模式（默认行为）
 # policy_daemon_if_disconnected: 仅当系统未连接 Wi-Fi 时才进入配网模式（守护进程风格）
 policy_on_start = []

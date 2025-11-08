@@ -120,7 +120,11 @@ where
                 .body(Body::from(data))
                 .unwrap(),
             Err(e) => {
-                tracing::error!(asset_path = "index.html", "FATAL: index.html not found: {}", e);
+                tracing::error!(
+                    asset_path = "index.html",
+                    "FATAL: index.html not found: {}",
+                    e
+                );
                 Response::builder()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
                     .body(Body::from("FATAL: index.html not found"))
@@ -131,7 +135,9 @@ where
 }
 
 /// 对应前端请求，执行实时扫描
-async fn api_scan_concurrent<F>(State(state): State<Arc<ConcurrentAppState<F>>>) -> impl IntoResponse
+async fn api_scan_concurrent<F>(
+    State(state): State<Arc<ConcurrentAppState<F>>>,
+) -> impl IntoResponse
 where
     F: UiAssetProvider,
 {
@@ -148,7 +154,11 @@ where
 
 /// 返回后端类型：concurrent
 async fn api_backend_kind_concurrent() -> impl IntoResponse {
-    (StatusCode::OK, Json(serde_json::json!({ "kind": "concurrent" }))).into_response()
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "kind": "concurrent" })),
+    )
+        .into_response()
 }
 
 // --- Route Handlers (Generic & TDM) ---
@@ -181,7 +191,11 @@ where
                 .body(Body::from(data))
                 .unwrap(),
             Err(e) => {
-                tracing::error!(asset_path = "index.html", "FATAL: index.html not found: {}", e);
+                tracing::error!(
+                    asset_path = "index.html",
+                    "FATAL: index.html not found: {}",
+                    e
+                );
                 Response::builder()
                     .status(StatusCode::INTERNAL_SERVER_ERROR)
                     .body(Body::from("FATAL: index.html not found"))
@@ -206,8 +220,6 @@ async fn api_backend_kind_tdm() -> impl IntoResponse {
     (StatusCode::OK, Json(serde_json::json!({ "kind": "tdm" }))).into_response()
 }
 
-
-
 async fn api_connect_concurrent<F>(
     State(state): State<Arc<ConcurrentAppState<F>>>,
     Json(payload): Json<ConnectionRequest>,
@@ -217,7 +229,11 @@ where
 {
     tracing::debug!(ssid = %payload.ssid, "Handling /api/connect request (Concurrent)");
     match state.backend.connect(&payload).await {
-        Ok(_) => (StatusCode::OK, Json(serde_json::json!({ "status": "success" }))).into_response(),
+        Ok(_) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "status": "success" })),
+        )
+            .into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": e.to_string() })),
@@ -235,7 +251,11 @@ where
 {
     tracing::debug!(ssid = %payload.ssid, "Handling /api/connect request (TDM)");
     match state.backend.connect(&payload).await {
-        Ok(_) => (StatusCode::OK, Json(serde_json::json!({ "status": "success" }))).into_response(),
+        Ok(_) => (
+            StatusCode::OK,
+            Json(serde_json::json!({ "status": "success" })),
+        )
+            .into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({ "error": e.to_string() })),

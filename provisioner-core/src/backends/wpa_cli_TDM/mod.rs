@@ -4,10 +4,10 @@
 use crate::traits::{ApConfig, ConnectionRequest, Network, PolicyCheck, TdmBackend};
 use crate::{Error, Result};
 use async_trait::async_trait;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
-use tokio::process::{Child, Command};
 use tokio::fs;
-use std::net::{SocketAddr, Ipv4Addr};
+use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
 const IFACE_NAME: &str = "wlan0";
@@ -17,8 +17,8 @@ const AP_IP_ADDR: &str = "192.168.4.1/24"; // retained for initial IP logic; gat
 pub struct WpaCliTdmBackend {
     ap_config: Arc<ApConfig>,
     // 控制 hostapd 进程的句柄
-    hostapd: Arc<Mutex<Option<Child>>> ,
-    dnsmasq: Arc<Mutex<Option<Child>>> ,
+    hostapd: Arc<Mutex<Option<Child>>>,
+    dnsmasq: Arc<Mutex<Option<Child>>>,
     // 上一次扫描结果（应用启动时会先执行一次扫描并保存）
     last_scan: Arc<Mutex<Option<Vec<Network>>>>,
 }
@@ -112,10 +112,7 @@ impl WpaCliTdmBackend {
         );
         let conf_path = "/tmp/provisioner_hostapd.conf";
         fs::write(conf_path, hostapd_conf.as_bytes()).await?;
-        let child = Command::new("hostapd")
-            .arg(conf_path)
-            .arg("-B")
-            .spawn()?;
+        let child = Command::new("hostapd").arg(conf_path).arg("-B").spawn()?;
         *self.hostapd.lock().await = Some(child);
 
         // 启动 dnsmasq
@@ -249,7 +246,9 @@ impl WpaCliTdmBackend {
 
         if networks.is_empty() {
             println!("📡 [WpaCliTDM] Initial scan returned no networks. Aborting startup.");
-            return Err(Error::CommandFailed("Initial scan returned no networks".into()));
+            return Err(Error::CommandFailed(
+                "Initial scan returned no networks".into(),
+            ));
         }
 
         // 存储结果
@@ -294,9 +293,12 @@ impl WpaCliTdmBackend {
             .output()
             .await?;
         if !output.status.success() {
-            return Err(Error::CommandFailed("wpa_cli add_network failed".to_string()));
+            return Err(Error::CommandFailed(
+                "wpa_cli add_network failed".to_string(),
+            ));
         }
-        let network_id_str = String::from_utf8(output.stdout).map_err(|e| Error::CommandFailed(format!("Failed to parse wpa_cli output: {}", e)))?;
+        let network_id_str = String::from_utf8(output.stdout)
+            .map_err(|e| Error::CommandFailed(format!("Failed to parse wpa_cli output: {}", e)))?;
         let network_id: u32 = match network_id_str.trim().parse::<u32>() {
             Ok(n) => n,
             Err(_) => {
@@ -372,10 +374,7 @@ impl WpaCliTdmBackend {
                     .status()
                     .await?;
                 // 成功后自动获取 DHCP（在后台运行 udhcpc），避免手动运行 `udhcpc -i wlan0`
-                let _ = Command::new("udhcpc")
-                    .arg("-i")
-                    .arg(IFACE_NAME)
-                    .spawn();
+                let _ = Command::new("udhcpc").arg("-i").arg(IFACE_NAME).spawn();
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                 return Ok(());
             }
@@ -460,7 +459,9 @@ impl TdmBackend for WpaCliTdmBackend {
         if let Some(vec) = &*self.last_scan.lock().await {
             Ok(vec.clone())
         } else {
-            Err(Error::CommandFailed("Initial scan yielded no networks".into()))
+            Err(Error::CommandFailed(
+                "Initial scan yielded no networks".into(),
+            ))
         }
     }
 

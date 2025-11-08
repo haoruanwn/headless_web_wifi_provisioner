@@ -1,4 +1,4 @@
-use crate::{Result};
+use crate::Result;
 use crate::traits::Network;
 
 /// Parse `wpa_cli scan_results`-style output into Vec<Network>.

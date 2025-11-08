@@ -33,7 +33,6 @@ use AssetRadxa as Asset;
 */
 // -----------------------------------------------------------------
 
-
 /// A UI asset provider that serves files embedded into the binary.
 /// (Note: For testing, we temporarily replace its logic with loading from disk)
 #[derive(Debug, Default)]
@@ -48,11 +47,10 @@ impl EmbedFrontend {
 #[async_trait]
 impl UiAssetProvider for EmbedFrontend {
     async fn get_asset(&self, path: &str) -> Result<(Cow<'static, [u8]>, String)> {
-        
         // -----------------------------------------------------------------
         // 4. Insert the "executable relative path" disk loading logic
         // -----------------------------------------------------------------
-        
+
         // A. Select theme path (this logic remains)
         #[cfg(feature = "ui_echo_mate")]
         let theme_path = "ui/themes/echo-mate";
@@ -69,19 +67,17 @@ impl UiAssetProvider for EmbedFrontend {
         // C. Construct the absolute path of the asset
         //    (e.g., /target/release/ui/themes/radxa_x4/index.html)
         let asset_path = exe_dir.join(theme_path).join(path);
-        
+
         // D. Read from disk
-        let content = fs::read(&asset_path)
-            .await
-            .map_err(|e| {
-                Error::AssetNotFound(format!(
-                    "Asset not found. Looked for: {:?}. Error: {}",
-                    asset_path, e
-                ))
-            })?;
-        
+        let content = fs::read(&asset_path).await.map_err(|e| {
+            Error::AssetNotFound(format!(
+                "Asset not found. Looked for: {:?}. Error: {}",
+                asset_path, e
+            ))
+        })?;
+
         // -----------------------------------------------------------------
-        
+
         /*
         // 5. Comment out the original Asset::get logic
         let asset = Asset::get(path).ok_or_else(|| Error::AssetNotFound(path.to_string()))?;

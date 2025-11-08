@@ -1,6 +1,6 @@
+use crate::runner::BackendRunner;
 use provisioner_core::traits::{PolicyCheck, UiAssetProvider};
-use std::sync::Arc;
-use crate::runner::BackendRunner; // Import BackendRunner
+use std::sync::Arc; // Import BackendRunner
 
 // Remove all cfg blocks!
 #[allow(dead_code)]
@@ -18,14 +18,19 @@ where
     // The check logic is now 100% backend-agnostic
     match policy_backend.is_connected().await {
         Ok(true) => {
-            println!("🛡️ Daemon Policy: Backend reports ALREADY CONNECTED. Provisioner will not start.");
+            println!(
+                "🛡️ Daemon Policy: Backend reports ALREADY CONNECTED. Provisioner will not start."
+            );
         }
         Ok(false) => {
             println!("🛡️ Daemon Policy: Backend reports NOT connected. Starting provisioner...");
             crate::runner::run_provisioning_server(frontend, runner_backend).await?;
         }
         Err(e) => {
-            println!("🛡️ Daemon Policy: Backend check failed ({}). Assuming NOT connected...", e);
+            println!(
+                "🛡️ Daemon Policy: Backend check failed ({}). Assuming NOT connected...",
+                e
+            );
             crate::runner::run_provisioning_server(frontend, runner_backend).await?;
         }
     }

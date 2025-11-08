@@ -3,12 +3,12 @@
 //! and provides different implementations for backends (Wi-Fi control)
 //! and frontends (UI asset delivery) controlled by feature flags.
 
-pub mod traits;
 pub mod backends;
-pub mod frontends;
-pub mod web_server;
+pub mod config;
 pub mod factory;
-pub mod config; // expose config parsing utilities
+pub mod frontends;
+pub mod traits;
+pub mod web_server; // expose config parsing utilities
 
 // Define a shared Error and Result type for the entire crate.
 
@@ -23,7 +23,6 @@ pub enum Error {
     CommandFailed(String),
 
     // WPA D-Bus backend related errors removed when backend_wpa_dbus feature was dropped.
-
     #[error("Web server error: {0}")]
     WebServer(#[from] axum::BoxError),
 
@@ -32,7 +31,6 @@ pub enum Error {
 
     #[error("UTF-8 conversion error: {0}")]
     Utf8(#[from] std::string::FromUtf8Error),
-
     // Add other specific error types here as needed.
     // For example, when we add the D-Bus backend:
     //

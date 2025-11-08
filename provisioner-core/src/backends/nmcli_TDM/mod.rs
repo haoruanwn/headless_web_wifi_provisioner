@@ -110,24 +110,48 @@ impl NmcliTdmBackend {
     fn parse_nmcli_list(output: &str) -> Vec<Network> {
         let mut networks = Vec::new();
         for line in output.lines() {
-            if line.trim().is_empty() { continue; }
+            if line.trim().is_empty() {
+                continue;
+            }
             let parts: Vec<&str> = line.split(':').collect();
             let ssid = parts.get(0).map(|s| s.to_string()).unwrap_or_default();
-            if ssid.is_empty() || ssid == "\\x00" { continue; }
-            let signal = parts.get(1).and_then(|s| s.parse::<i16>().ok()).unwrap_or(0);
-            let security = parts.get(2).map(|s| s.to_string()).unwrap_or_else(|| "Unknown".to_string());
+            if ssid.is_empty() || ssid == "\\x00" {
+                continue;
+            }
+            let signal = parts
+                .get(1)
+                .and_then(|s| s.parse::<i16>().ok())
+                .unwrap_or(0);
+            let security = parts
+                .get(2)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "Unknown".to_string());
             let signal_percent = ((signal.clamp(-100, -50) + 100) * 2) as u8;
-            networks.push(Network { ssid, signal: signal_percent, security });
+            networks.push(Network {
+                ssid,
+                signal: signal_percent,
+                security,
+            });
         }
         networks
     }
 
     async fn scan_internal(&self) -> Result<Vec<Network>> {
-        let _ = Command::new("nmcli").arg("device").arg("wifi").arg("rescan").output().await;
+        let _ = Command::new("nmcli")
+            .arg("device")
+            .arg("wifi")
+            .arg("rescan")
+            .output()
+            .await;
         let output = Command::new("nmcli")
-            .arg("-t").arg("-f").arg("SSID,SIGNAL,SECURITY")
-            .arg("device").arg("wifi").arg("list")
-            .output().await?;
+            .arg("-t")
+            .arg("-f")
+            .arg("SSID,SIGNAL,SECURITY")
+            .arg("device")
+            .arg("wifi")
+            .arg("list")
+            .output()
+            .await?;
         if !output.status.success() {
             let err = String::from_utf8_lossy(&output.stderr);
             return Err(Error::CommandFailed(format!("nmcli scan failed: {}", err)));
@@ -138,12 +162,19 @@ impl NmcliTdmBackend {
 
     async fn check_connected_to_ssid(ssid: &str) -> Result<bool> {
         let output = Command::new("nmcli")
-            .arg("-t").arg("-f").arg("NAME,DEVICE,STATE")
-            .arg("connection").arg("show").arg("--active")
-            .output().await;
+            .arg("-t")
+            .arg("-f")
+            .arg("NAME,DEVICE,STATE")
+            .arg("connection")
+            .arg("show")
+            .arg("--active")
+            .output()
+            .await;
         match output {
             Ok(out) => {
-                if !out.status.success() { return Ok(false); }
+                if !out.status.success() {
+                    return Ok(false);
+                }
                 let stdout = String::from_utf8_lossy(&out.stdout);
                 for line in stdout.lines() {
                     let parts: Vec<&str> = line.split(':').collect();
@@ -162,7 +193,9 @@ impl NmcliTdmBackend {
     pub async fn enter_provisioning_mode_with_scan_impl(&self) -> Result<Vec<Network>> {
         let networks = self.scan_internal().await?;
         if networks.is_empty() {
-            return Err(Error::CommandFailed("Initial scan returned no networks".into()));
+            return Err(Error::CommandFailed(
+                "Initial scan returned no networks".into(),
+            ));
         }
         *self.last_scan.lock().await = Some(networks.clone());
         self.start_ap().await?;
@@ -171,29 +204,59 @@ impl NmcliTdmBackend {
 
     pub async fn connect_impl(&self, ssid: &str, password: &str) -> Result<()> {
         self.stop_ap().await?;
-        let _ = Command::new("nmcli").arg("device").arg("disconnect").arg(IFACE_NAME).status().await;
+        let _ = Command::new("nmcli")
+            .arg("device")
+            .arg("disconnect")
+            .arg(IFACE_NAME)
+            .status()
+            .await;
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-        let _ = Command::new("nmcli").arg("device").arg("wifi").arg("rescan").status().await;
+        let _ = Command::new("nmcli")
+            .arg("device")
+            .arg("wifi")
+            .arg("rescan")
+            .status()
+            .await;
         tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
 
         let connect_cmd = if password.is_empty() {
-            Command::new("nmcli").arg("device").arg("wifi").arg("connect").arg(ssid).spawn()
+            Command::new("nmcli")
+                .arg("device")
+                .arg("wifi")
+                .arg("connect")
+                .arg(ssid)
+                .spawn()
         } else {
-            Command::new("nmcli").arg("device").arg("wifi").arg("connect").arg(ssid).arg("password").arg(password).spawn()
+            Command::new("nmcli")
+                .arg("device")
+                .arg("wifi")
+                .arg("connect")
+                .arg(ssid)
+                .arg("password")
+                .arg(password)
+                .spawn()
         };
-        if let Err(e) = connect_cmd { return Err(Error::Io(e)); }
+        if let Err(e) = connect_cmd {
+            return Err(Error::Io(e));
+        }
 
         for _ in 0..20 {
-            if let Ok(true) = Self::check_connected_to_ssid(ssid).await { return Ok(()); }
+            if let Ok(true) = Self::check_connected_to_ssid(ssid).await {
+                return Ok(());
+            }
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         }
         let _ = self.start_ap().await;
-        Err(Error::CommandFailed(format!("Connection to '{}' timed out (20s)", ssid).into()))
+        Err(Error::CommandFailed(
+            format!("Connection to '{}' timed out (20s)", ssid).into(),
+        ))
     }
 
     pub async fn scan_impl(&self) -> Result<Vec<Network>> {
-        if let Some(vec) = &*self.last_scan.lock().await { return Ok(vec.clone()); }
+        if let Some(vec) = &*self.last_scan.lock().await {
+            return Ok(vec.clone());
+        }
         let networks = self.scan_internal().await?;
         *self.last_scan.lock().await = Some(networks.clone());
         Ok(networks)
@@ -203,9 +266,18 @@ impl NmcliTdmBackend {
 #[async_trait]
 impl PolicyCheck for NmcliTdmBackend {
     async fn is_connected(&self) -> Result<bool> {
-        match Command::new("nmcli").arg("-t").arg("-f").arg("STATE").arg("general").output().await {
+        match Command::new("nmcli")
+            .arg("-t")
+            .arg("-f")
+            .arg("STATE")
+            .arg("general")
+            .output()
+            .await
+        {
             Ok(out) => {
-                if !out.status.success() { return Ok(false); }
+                if !out.status.success() {
+                    return Ok(false);
+                }
                 let s = String::from_utf8_lossy(&out.stdout).to_lowercase();
                 Ok(s.contains("connected"))
             }
@@ -216,7 +288,9 @@ impl PolicyCheck for NmcliTdmBackend {
 
 #[async_trait]
 impl TdmBackend for NmcliTdmBackend {
-    fn get_ap_config(&self) -> ApConfig { self.ap_config.as_ref().clone() }
+    fn get_ap_config(&self) -> ApConfig {
+        self.ap_config.as_ref().clone()
+    }
 
     async fn enter_provisioning_mode_with_scan(&self) -> Result<Vec<Network>> {
         self.enter_provisioning_mode_with_scan_impl().await

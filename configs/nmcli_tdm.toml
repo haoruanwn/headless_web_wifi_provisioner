@@ -1,4 +1,4 @@
-ap_ssid = "NMCLI-Provisioner"
-ap_psk = "nmcli123456"
+ap_ssid = "Provisioner"
+ap_psk = "12345678"
 ap_gateway_cidr = "192.168.4.1/24"
 ap_bind_addr = "192.168.4.1:80"

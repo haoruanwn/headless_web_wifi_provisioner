@@ -68,9 +68,9 @@ cargo run --release --features "\
 ```bash
 # 场景A：使用 networkmanager 后端（TDM）并立即进入配网
 cargo build --release --features "\
-   provisioner-daemon/backend_networkmanager_TDM \
+   provisioner-daemon/backend_nmdbus_TDM \
    provisioner-daemon/ui_radxa_x4 \
-   provisioner-daemon/policy_on_start" --release
+   provisioner-daemon/policy_on_start"
 
 # 场景B：使用 wpa_cli 后端（TDM）
 cargo build --release --features "\

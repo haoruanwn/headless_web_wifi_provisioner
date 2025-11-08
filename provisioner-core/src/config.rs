@@ -13,8 +13,8 @@ struct ApConfigFile {
 
 impl From<ApConfigFile> for ApConfig {
     fn from(t: ApConfigFile) -> Self {
-        let bind_addr = SocketAddr::from_str(&t.ap_bind_addr)
-            .expect("Invalid ap_bind_addr in TOML");
+        let bind_addr =
+            SocketAddr::from_str(&t.ap_bind_addr).expect("Invalid ap_bind_addr in TOML");
         ApConfig {
             ssid: t.ap_ssid,
             psk: t.ap_psk,

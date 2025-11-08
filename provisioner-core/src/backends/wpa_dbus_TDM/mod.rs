@@ -3,10 +3,13 @@ use crate::traits::{ApConfig, ConnectionRequest, Network, PolicyCheck, TdmBacken
 use crate::{Error, Result};
 use async_trait::async_trait;
 use once_cell::sync::Lazy;
+use std::collections::HashMap;
+use std::convert::TryInto;
 use std::sync::Arc;
+use tokio::fs;
 use tokio::process::Command;
 use tokio::sync::Mutex;
-use tokio::fs;
+use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 use zbus::{Connection, Proxy};
 
 // MVP DBus backend for wpa_supplicant + external hostapd/dnsmasq for AP mode.
@@ -43,70 +46,172 @@ impl WpaDbusTdmBackend {
     }
 
     async fn ensure_conn(&self) -> Result<Connection> {
-        if let Some(c) = self.conn.lock().await.clone() { return Ok(c); }
-        let c = Connection::system().await.map_err(|e| Error::CommandFailed(format!("DBus connect failed: {}", e)))?;
+        if let Some(c) = self.conn.lock().await.clone() {
+            return Ok(c);
+        }
+        let c = Connection::system()
+            .await
+            .map_err(|e| Error::CommandFailed(format!("DBus connect failed: {}", e)))?;
         *self.conn.lock().await = Some(c.clone());
         Ok(c)
     }
 
     async fn root_proxy(&self) -> Result<Proxy<'_>> {
         let conn = self.ensure_conn().await?;
-        Proxy::builder(&conn)
-            .destination(WPA_SUPPLICANT_SERVICE)
-            .map_err(|e| Error::CommandFailed(format!("dest error: {}", e)))?
-            .path(WPA_SUPPLICANT_PATH)
-            .map_err(|e| Error::CommandFailed(format!("path error: {}", e)))?
-            .interface(WPA_SUPPLICANT_INTERFACE)
-            .map_err(|e| Error::CommandFailed(format!("iface error: {}", e)))?
-            .build()
+        Proxy::new(
+            &conn,
+            WPA_SUPPLICANT_SERVICE,
+            WPA_SUPPLICANT_PATH,
+            WPA_SUPPLICANT_INTERFACE,
+        )
+        .await
+        .map_err(|e| Error::CommandFailed(format!("proxy create error: {}", e)))
+    }
+
+    #[inline]
+    fn ov<'a, V>(v: V) -> OwnedValue
+    where
+        V: Into<Value<'a>>,
+    {
+        v.into().try_into().unwrap()
+    }
+
+    async fn ensure_iface_path(&self) -> Result<OwnedObjectPath> {
+        let mgr = self.root_proxy().await?;
+        let result = mgr.call_method("GetInterface", &(IFACE_NAME,)).await;
+        if result.is_ok() {
+            let reply = result.unwrap();
+            let path: OwnedObjectPath = reply
+                .body()
+                .deserialize()
+                .map_err(|e| Error::CommandFailed(format!("GetInterface decode failed: {}", e)))?;
+            return Ok(path);
+        }
+
+        // Try to start wpa_supplicant and retry
+        let _ = Command::new("wpa_supplicant")
+            .arg("-B")
+            .arg(format!("-i{}", IFACE_NAME))
+            .arg("-c/etc/wpa_supplicant.conf")
+            .spawn();
+        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+
+        let reply = mgr
+            .call_method("GetInterface", &(IFACE_NAME,))
             .await
-            .map_err(|e| Error::CommandFailed(format!("proxy build error: {}", e)))
+            .map_err(|e| Error::CommandFailed(format!("GetInterface failed: {}", e)))?;
+        let path: OwnedObjectPath = reply
+            .body()
+            .deserialize()
+            .map_err(|e| Error::CommandFailed(format!("GetInterface decode failed: {}", e)))?;
+        Ok(path)
     }
 
     async fn scan_internal(&self) -> Result<Vec<Network>> {
-        // Fallback to wpa_cli textual scan for first MVP (DBus expects per-interface object resolution)
-        let output = Command::new("wpa_cli").arg("-i").arg(IFACE_NAME).arg("scan").output().await?;
-        if !output.status.success() {
-            return Err(Error::CommandFailed("wpa_cli scan failed".into()));
-        }
-        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-        let output = Command::new("wpa_cli").arg("-i").arg(IFACE_NAME).arg("scan_results").output().await?;
-        if !output.status.success() {
-            return Err(Error::CommandFailed("wpa_cli scan_results failed".into()));
-        }
-        let stdout = String::from_utf8_lossy(&output.stdout);
+        let iface_path = self.ensure_iface_path().await?;
+        let conn = self.ensure_conn().await?;
+        let iface = Proxy::new(
+            &conn,
+            WPA_SUPPLICANT_SERVICE,
+            iface_path.as_ref(),
+            "fi.w1.wpa_supplicant1.Interface",
+        )
+        .await
+        .map_err(|e| Error::CommandFailed(format!("iface proxy error: {}", e)))?;
+        // Trigger scan: Scan(a{sv}) with empty options
+        let opts: HashMap<String, OwnedValue> = HashMap::new();
+        let _ = iface
+            .call_method("Scan", &(opts))
+            .await
+            .map_err(|e| Error::CommandFailed(format!("Scan failed: {}", e)))?;
+        // Wait briefly; can be improved by listening to signals
+        tokio::time::sleep(tokio::time::Duration::from_secs(3)).await;
+        // Read BSS list
+        let bss_paths: Vec<OwnedObjectPath> = iface
+            .get_property::<Vec<OwnedObjectPath>>("BSSs")
+            .await
+            .map_err(|e| Error::CommandFailed(format!("Get BSSs failed: {}", e)))?;
+        let conn = self.ensure_conn().await?;
         let mut networks = Vec::new();
-        for line in stdout.lines().skip(1) {
-            let parts: Vec<&str> = line.split('\t').collect();
-            if parts.len() >= 5 {
-                let signal_level: i16 = parts[2].parse().unwrap_or(0);
-                let flags = parts[3];
-                let ssid = parts[4].to_string();
-                if ssid.is_empty() || ssid == "\x00" { continue; }
-                let security = if flags.contains("WPA2") { "WPA2" } else if flags.contains("WPA") { "WPA" } else if flags.contains("WEP") { "WEP" } else { "Open" }.to_string();
-                let signal_percent = ((signal_level.clamp(-100, -50) + 100) * 2) as u8;
-                networks.push(Network { ssid, signal: signal_percent, security });
+        for bss_path in bss_paths {
+            let bss = Proxy::new(
+                &conn,
+                WPA_SUPPLICANT_SERVICE,
+                bss_path.as_ref(),
+                "fi.w1.wpa_supplicant1.BSS",
+            )
+            .await
+            .map_err(|e| Error::CommandFailed(format!("BSS proxy error: {}", e)))?;
+            let ssid_bytes = bss
+                .get_property::<Vec<u8>>("SSID")
+                .await
+                .unwrap_or_default();
+            if ssid_bytes.is_empty() {
+                continue;
             }
+            let signal_dbm: i16 = bss.get_property::<i16>("Signal").await.unwrap_or(-100);
+            // Determine security from WPA/RSN presence
+            let wpa: HashMap<String, OwnedValue> =
+                bss.get_property("WPA").await.unwrap_or_default();
+            let rsn: HashMap<String, OwnedValue> =
+                bss.get_property("RSN").await.unwrap_or_default();
+            let security = if !rsn.is_empty() {
+                "WPA2".to_string()
+            } else if !wpa.is_empty() {
+                "WPA".to_string()
+            } else {
+                "Open".to_string()
+            };
+            let ssid = String::from_utf8(ssid_bytes.clone())
+                .unwrap_or_else(|_| format!("{:X?}", ssid_bytes));
+            let signal_percent = ((signal_dbm.clamp(-100, -50) + 100) * 2) as u8;
+            networks.push(Network {
+                ssid,
+                signal: signal_percent,
+                security,
+            });
         }
         Ok(networks)
     }
 
     async fn enter_with_scan_impl(&self) -> Result<Vec<Network>> {
         let networks = self.scan_internal().await?;
-        if networks.is_empty() { return Err(Error::CommandFailed("Initial scan returned no networks".into())); }
+        if networks.is_empty() {
+            return Err(Error::CommandFailed(
+                "Initial scan returned no networks".into(),
+            ));
+        }
         *self.last_scan.lock().await = Some(networks.clone());
         self.start_ap().await?;
         Ok(networks)
     }
 
     async fn start_ap(&self) -> Result<()> {
-        let _ = Command::new("killall").arg("-9").arg("hostapd").arg("dnsmasq").arg("wpa_supplicant").status().await;
-        let output = Command::new("ip").arg("addr").arg("add").arg(&self.ap_config.gateway_cidr).arg("dev").arg(IFACE_NAME).output().await?;
+        let _ = Command::new("killall")
+            .arg("-9")
+            .arg("hostapd")
+            .arg("dnsmasq")
+            .arg("wpa_supplicant")
+            .status()
+            .await;
+        let output = Command::new("ip")
+            .arg("addr")
+            .arg("add")
+            .arg(&self.ap_config.gateway_cidr)
+            .arg("dev")
+            .arg(IFACE_NAME)
+            .output()
+            .await?;
         if !output.status.success() {
             let err = String::from_utf8_lossy(&output.stderr);
-            if !err.contains("File exists") { return Err(Error::CommandFailed(format!("Failed to set IP: {}", err))); }
+            if !err.contains("File exists") {
+                return Err(Error::CommandFailed(format!("Failed to set IP: {}", err)));
+            }
         }
-        let hostapd_conf = format!("interface={}\nssid={}\nwpa=2\nwpa_passphrase={}\nhw_mode=g\nchannel=6\nwpa_key_mgmt=WPA-PSK\nwpa_pairwise=CCMP\nrsn_pairwise=CCMP\n", IFACE_NAME, self.ap_config.ssid, self.ap_config.psk);
+        let hostapd_conf = format!(
+            "interface={}\nssid={}\nwpa=2\nwpa_passphrase={}\nhw_mode=g\nchannel=6\nwpa_key_mgmt=WPA-PSK\nwpa_pairwise=CCMP\nrsn_pairwise=CCMP\n",
+            IFACE_NAME, self.ap_config.ssid, self.ap_config.psk
+        );
         let conf_path = "/tmp/provisioner_hostapd.conf";
         fs::write(conf_path, hostapd_conf.as_bytes()).await?;
         let child = Command::new("hostapd").arg(conf_path).arg("-B").spawn()?;
@@ -125,53 +230,89 @@ impl WpaDbusTdmBackend {
     }
 
     async fn stop_ap(&self) -> Result<()> {
-        if let Some(mut child) = self.dnsmasq.lock().await.take() { let _ = child.kill().await; }
-        if let Some(mut child) = self.hostapd.lock().await.take() { let _ = child.kill().await; }
-        let output = Command::new("ip").arg("addr").arg("del").arg(&self.ap_config.gateway_cidr).arg("dev").arg(IFACE_NAME).output().await?;
+        if let Some(mut child) = self.dnsmasq.lock().await.take() {
+            let _ = child.kill().await;
+        }
+        if let Some(mut child) = self.hostapd.lock().await.take() {
+            let _ = child.kill().await;
+        }
+        let output = Command::new("ip")
+            .arg("addr")
+            .arg("del")
+            .arg(&self.ap_config.gateway_cidr)
+            .arg("dev")
+            .arg(IFACE_NAME)
+            .output()
+            .await?;
         if !output.status.success() {
             let err = String::from_utf8_lossy(&output.stderr);
-            if !err.contains("Cannot assign requested address") { return Err(Error::CommandFailed(format!("Failed to clean IP: {}", err))); }
+            if !err.contains("Cannot assign requested address") {
+                return Err(Error::CommandFailed(format!("Failed to clean IP: {}", err)));
+            }
         }
         let _ = fs::remove_file("/tmp/provisioner_hostapd.conf").await;
         Ok(())
     }
 
     pub async fn connect_impl(&self, ssid: &str, password: &str) -> Result<()> {
-        self.stop_ap().await?;
-        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-        let output = Command::new("wpa_cli").arg("-i").arg(IFACE_NAME).arg("add_network").output().await?;
-        if !output.status.success() { return Err(Error::CommandFailed("add_network failed".into())); }
-        let id_str = String::from_utf8_lossy(&output.stdout);
-        let network_id: u32 = id_str.trim().parse().map_err(|_| Error::CommandFailed(format!("Invalid network id: {}", id_str)))?;
-        let ssid_arg = format!("\"{}\"", ssid);
-        Command::new("wpa_cli").arg("-i").arg(IFACE_NAME).arg("set_network").arg(network_id.to_string()).arg("ssid").arg(&ssid_arg).status().await?;
+        // Stop AP first
+        let _ = self.stop_ap().await;
+        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+        let iface_path = self.ensure_iface_path().await?;
+        let conn = self.ensure_conn().await?;
+        let iface = Proxy::new(
+            &conn,
+            WPA_SUPPLICANT_SERVICE,
+            iface_path.as_ref(),
+            "fi.w1.wpa_supplicant1.Interface",
+        )
+        .await
+        .map_err(|e| Error::CommandFailed(format!("iface proxy error: {}", e)))?;
+
+        // Build network settings a{sv}
+        let mut net: HashMap<String, OwnedValue> = HashMap::new();
+        net.insert("ssid".into(), Self::ov(ssid.as_bytes().to_vec()));
         if password.is_empty() {
-            Command::new("wpa_cli").arg("-i").arg(IFACE_NAME).arg("set_network").arg(network_id.to_string()).arg("key_mgmt").arg("NONE").status().await?;
+            net.insert("key_mgmt".into(), Self::ov("NONE"));
         } else {
-            let psk_arg = format!("\"{}\"", password);
-            Command::new("wpa_cli").arg("-i").arg(IFACE_NAME).arg("set_network").arg(network_id.to_string()).arg("psk").arg(&psk_arg).status().await?;
+            net.insert("key_mgmt".into(), Self::ov("WPA-PSK"));
+            net.insert("psk".into(), Self::ov(password.to_string()));
         }
-        Command::new("wpa_cli").arg("-i").arg(IFACE_NAME).arg("enable_network").arg(network_id.to_string()).status().await?;
+
+        // AddNetwork -> object path
+        let reply = iface
+            .call_method("AddNetwork", &(net))
+            .await
+            .map_err(|e| Error::CommandFailed(format!("AddNetwork failed: {}", e)))?;
+        let net_path: OwnedObjectPath = reply
+            .body()
+            .deserialize()
+            .map_err(|e| Error::CommandFailed(format!("AddNetwork decode failed: {}", e)))?;
+
+        // SelectNetwork
+        let _ = iface
+            .call_method("SelectNetwork", &(net_path.as_ref(),))
+            .await
+            .map_err(|e| Error::CommandFailed(format!("SelectNetwork failed: {}", e)))?;
+
+        // Poll interface state
         for _ in 0..30 {
-            let status_output = Command::new("wpa_cli").arg("-i").arg(IFACE_NAME).arg("status").output().await?;
-            if !status_output.status.success() { return Err(Error::CommandFailed("status failed".into())); }
-            let status_str = String::from_utf8_lossy(&status_output.stdout);
-            if status_str.contains("wpa_state=COMPLETED") {
-                Command::new("wpa_cli").arg("-i").arg(IFACE_NAME).arg("save_config").status().await?;
+            let state: String = iface
+                .get_property("State")
+                .await
+                .unwrap_or_else(|_| "disconnected".to_string());
+            if state.to_lowercase() == "completed" {
                 let _ = Command::new("udhcpc").arg("-i").arg(IFACE_NAME).spawn();
                 tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
                 return Ok(());
             }
-            if status_str.contains("reason=WRONG_KEY") {
-                Command::new("wpa_cli").arg("-i").arg(IFACE_NAME).arg("remove_network").arg(network_id.to_string()).status().await?;
-                let networks = self.scan_internal().await.unwrap_or_default();
-                *self.last_scan.lock().await = Some(networks);
-                let _ = self.start_ap().await;
-                return Err(Error::CommandFailed("Invalid password".into()));
-            }
             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
         }
-        Command::new("wpa_cli").arg("-i").arg(IFACE_NAME).arg("remove_network").arg(network_id.to_string()).status().await?;
+
+        // Timeout: clean network and restore AP list
+        let _ = iface
+            .call_method("RemoveNetwork", &(net_path.as_ref(),))
+            .await;
         let networks = self.scan_internal().await.unwrap_or_default();
         *self.last_scan.lock().await = Some(networks);
         let _ = self.start_ap().await;
@@ -182,12 +323,23 @@ impl WpaDbusTdmBackend {
 #[async_trait]
 impl PolicyCheck for WpaDbusTdmBackend {
     async fn is_connected(&self) -> Result<bool> {
-        let output = Command::new("wpa_cli").arg("-i").arg(IFACE_NAME).arg("status").output().await;
-        match output {
-            Ok(out) => {
-                if !out.status.success() { return Ok(false); }
-                let stdout = String::from_utf8_lossy(&out.stdout);
-                if stdout.contains("wpa_state=COMPLETED") && stdout.contains("ip_address=") { Ok(true) } else { Ok(false) }
+        // Check via DBus Interface.State
+        match self.ensure_iface_path().await {
+            Ok(iface_path) => {
+                let conn = self.ensure_conn().await?;
+                let iface = Proxy::new(
+                    &conn,
+                    WPA_SUPPLICANT_SERVICE,
+                    iface_path.as_ref(),
+                    "fi.w1.wpa_supplicant1.Interface",
+                )
+                .await
+                .map_err(|e| Error::CommandFailed(format!("iface proxy error: {}", e)))?;
+                let state: String = iface
+                    .get_property("State")
+                    .await
+                    .unwrap_or_else(|_| "disconnected".into());
+                Ok(state.to_lowercase() == "completed")
             }
             Err(_) => Ok(false),
         }
@@ -196,7 +348,9 @@ impl PolicyCheck for WpaDbusTdmBackend {
 
 #[async_trait]
 impl TdmBackend for WpaDbusTdmBackend {
-    fn get_ap_config(&self) -> ApConfig { self.ap_config.as_ref().clone() }
+    fn get_ap_config(&self) -> ApConfig {
+        self.ap_config.as_ref().clone()
+    }
 
     async fn enter_provisioning_mode_with_scan(&self) -> Result<Vec<Network>> {
         self.enter_with_scan_impl().await

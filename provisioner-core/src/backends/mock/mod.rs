@@ -1,8 +1,10 @@
 use crate::Result;
-use crate::traits::{ApConfig, ConnectionRequest, ConcurrentBackend, TdmBackend, Network, PolicyCheck};
+use crate::traits::{
+    ApConfig, ConcurrentBackend, ConnectionRequest, Network, PolicyCheck, TdmBackend,
+};
 use async_trait::async_trait;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::time::Duration;
-use std::net::{SocketAddr, Ipv4Addr};
 use tokio::time::sleep;
 
 /// A mock backend for testing purposes.
@@ -15,8 +17,6 @@ impl MockConcurrentBackend {
         Self
     }
 }
-
- 
 
 #[async_trait]
 impl ConcurrentBackend for MockConcurrentBackend {
@@ -75,7 +75,11 @@ impl ConcurrentBackend for MockConcurrentBackend {
         println!(
             "🤖 [MockBackend] Attempting to connect to SSID: '{}' with password: '{}'",
             req.ssid,
-            if req.password.is_empty() { "(empty)" } else { "********" }
+            if req.password.is_empty() {
+                "(empty)"
+            } else {
+                "********"
+            }
         );
         // Simulate a connection delay
         sleep(Duration::from_secs(3)).await;
@@ -112,7 +116,9 @@ impl PolicyCheck for MockConcurrentBackend {
 pub struct MockTdmBackend;
 
 impl MockTdmBackend {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 }
 
 #[async_trait]
@@ -130,13 +136,24 @@ impl TdmBackend for MockTdmBackend {
         // Simulate scan delay
         sleep(Duration::from_secs(2)).await;
         Ok(vec![
-            Network { ssid: "TDM_Network_A".into(), signal: 80, security: "WPA2".into() },
-            Network { ssid: "TDM_Network_B".into(), signal: 60, security: "Open".into() },
+            Network {
+                ssid: "TDM_Network_A".into(),
+                signal: 80,
+                security: "WPA2".into(),
+            },
+            Network {
+                ssid: "TDM_Network_B".into(),
+                signal: 60,
+                security: "Open".into(),
+            },
         ])
     }
 
     async fn connect(&self, req: &ConnectionRequest) -> Result<()> {
-        println!("🤖 [MockTdmBackend] Connect (terminating) to '{}' simulated", req.ssid);
+        println!(
+            "🤖 [MockTdmBackend] Connect (terminating) to '{}' simulated",
+            req.ssid
+        );
         sleep(Duration::from_secs(1)).await;
         Ok(())
     }
