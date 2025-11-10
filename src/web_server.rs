@@ -1,11 +1,11 @@
 use crate::backend::WpaDbusBackend;
 use crate::structs::{ConnectionRequest, Network};
 use axum::{
+    Router,
     extract::State,
     http::StatusCode,
     response::{IntoResponse, Json},
     routing::{get, post},
-    Router,
 };
 use std::sync::{Arc, Mutex};
 use tokio::net::TcpListener;

@@ -790,6 +790,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "provisioner"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "futures-util",
+ "once_cell",
+ "serde",
+ "serde_json",
+ "tokio",
+ "toml",
+ "tower-http",
+ "tracing",
+ "tracing-subscriber",
+ "zbus",
+ "zbus_macros",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.42"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -963,25 +982,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b2a4719bff48cee6b39d12c020eeb490953ad2443b7055bd0b21fca26bd8c28b"
 dependencies = [
  "libc",
-]
-
-[[package]]
-name = "simple-provisioner-wpadbus"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "futures-util",
- "once_cell",
- "serde",
- "serde_json",
- "tokio",
- "toml",
- "tower-http",
- "tracing",
- "tracing-subscriber",
- "zbus",
- "zbus_macros",
 ]
 
 [[package]]

@@ -1,6 +1,6 @@
+mod backend;
 mod config;
 mod structs;
-mod backend;
 mod web_server;
 
 use anyhow::Result;
@@ -23,7 +23,10 @@ async fn main() -> Result<()> {
     tracing::info!("📡 Executing initial D-Bus scan and starting AP...");
     let initial_networks = match backend.setup_and_scan().await {
         Ok(networks) => {
-            tracing::info!("✅ Initial scan complete, found {} networks. AP started.", networks.len());
+            tracing::info!(
+                "✅ Initial scan complete, found {} networks. AP started.",
+                networks.len()
+            );
             networks
         }
         Err(e) => {

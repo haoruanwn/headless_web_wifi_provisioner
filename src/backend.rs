@@ -1,16 +1,17 @@
-use crate::config::{ap_config_from_toml_str, ApConfig};
+use crate::config::{ApConfig, ap_config_from_toml_str};
 use crate::structs::{ConnectionRequest, Network};
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
+use futures_util::stream::StreamExt;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::fs;
 use tokio::process::Command;
 use tokio::sync::Mutex;
 use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
 use zbus::{Connection, Proxy};
-use futures_util::stream::StreamExt;
 
 // 从配置文件加载 AP 配置
 static GLOBAL_AP_CONFIG: Lazy<ApConfig> = Lazy::new(|| {
@@ -39,9 +40,7 @@ impl WpaDbusBackend {
         // 创建自包含的 wpa_supplicant 配置文件
         let update_config_str = if config.wpa_update_config { "1" } else { "0" };
         let wpa_conf_content = format!(
-            "ctrl_interface=DIR={} GROUP={}\nupdate_config={}\n",
-            config.wpa_ctrl_interface,
-            config.wpa_group,
+            "ctrl_interface=dbus\nupdate_config={}\n",
             update_config_str
         );
         std::fs::write(&config.wpa_conf_path, wpa_conf_content.as_bytes())
@@ -111,9 +110,15 @@ impl WpaDbusBackend {
             return Ok(path);
         }
 
-        tracing::info!("wpa_supplicant D-Bus interface not available, attempting to start daemon...");
+        tracing::info!(
+            "wpa_supplicant D-Bus interface not available, attempting to start daemon..."
+        );
 
-        // 启动 wpa_supplicant，使用配置中的参数
+        // [改进] 先尝试优雅地清理残留的 wpa_supplicant（不使用 -9）
+        // 这样可以在程序崩溃或被杀死后保证一个更干净的启动环境
+        let _ = Command::new("killall").arg("wpa_supplicant").status().await;
+
+        // 启动 wpa_supplicant，使用配置中的参数并启用 -u（让 wpa_supplicant 连接到 system dbus）
         let spawn_result = Command::new("wpa_supplicant")
             .arg("-B")
             .arg(format!("-i{}", iface_name))
@@ -130,18 +135,28 @@ impl WpaDbusBackend {
             }
         }
 
-        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-
-        // 重试获取接口
-        let reply = mgr
-            .call_method("GetInterface", &(iface_name,))
-            .await
-            .map_err(|e| anyhow!("GetInterface failed after daemon startup: {}", e))?;
-        let path: OwnedObjectPath = reply
-            .body()
-            .deserialize()
-            .map_err(|e| anyhow!("GetInterface decode failed: {}", e))?;
-        Ok(path)
+        // 使用带超时的重试循环替代固定 sleep。总超时可配置，这里使用 15s。
+        let start = Instant::now();
+        let timeout = Duration::from_secs(15);
+        loop {
+            match mgr.call_method("GetInterface", &(iface_name,)).await {
+                Ok(reply) => {
+                    let path: OwnedObjectPath = reply
+                        .body()
+                        .deserialize()
+                        .map_err(|e| anyhow!("GetInterface decode failed: {}", e))?;
+                    return Ok(path);
+                }
+                Err(_) => {
+                    if start.elapsed() > timeout {
+                        return Err(anyhow!(
+                            "GetInterface failed after daemon startup: timeout waiting for registration"
+                        ));
+                    }
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                }
+            }
+        }
     }
 
     /// 内部扫描方法
@@ -223,8 +238,10 @@ impl WpaDbusBackend {
             let signal_dbm: i16 = bss.get_property::<i16>("Signal").await.unwrap_or(-100);
 
             // 获取安全信息
-            let wpa: HashMap<String, OwnedValue> = bss.get_property("WPA").await.unwrap_or_default();
-            let rsn: HashMap<String, OwnedValue> = bss.get_property("RSN").await.unwrap_or_default();
+            let wpa: HashMap<String, OwnedValue> =
+                bss.get_property("WPA").await.unwrap_or_default();
+            let rsn: HashMap<String, OwnedValue> =
+                bss.get_property("RSN").await.unwrap_or_default();
 
             let security = if !rsn.is_empty() {
                 "WPA2".to_string()
@@ -285,7 +302,10 @@ impl WpaDbusBackend {
 
         // 写入 hostapd 配置文件
         fs::write(&self.ap_config.hostapd_conf_path, hostapd_conf.as_bytes()).await?;
-        tracing::debug!("Created hostapd config at: {}", self.ap_config.hostapd_conf_path);
+        tracing::debug!(
+            "Created hostapd config at: {}",
+            self.ap_config.hostapd_conf_path
+        );
 
         // 启动 hostapd
         let child = Command::new("hostapd")
@@ -306,7 +326,10 @@ impl WpaDbusBackend {
             .spawn()?;
 
         *self.dnsmasq.lock().await = Some(dnsmasq_child);
-        tracing::info!("AP started successfully on {}", self.ap_config.interface_name);
+        tracing::info!(
+            "AP started successfully on {}",
+            self.ap_config.interface_name
+        );
         Ok(())
     }
 
@@ -432,7 +455,9 @@ impl WpaDbusBackend {
             Ok(Err(e)) => Err(e),
             Err(_) => {
                 // 超时：清理网络并尝试恢复 AP
-                let _ = iface.call_method("RemoveNetwork", &(net_path.as_ref(),)).await;
+                let _ = iface
+                    .call_method("RemoveNetwork", &(net_path.as_ref(),))
+                    .await;
                 let _ = self.start_ap().await;
                 Err(anyhow!("Connection timed out"))
             }
