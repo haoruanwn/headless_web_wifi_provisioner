@@ -63,10 +63,6 @@ impl WpaCtrlBackend {
 
     /// 辅助函数：确保 wpa_supplicant 在运行
     fn ensure_wpa_supplicant_daemon(config: &ApConfig) -> Result<()> {
-        // [!!] 关键修复：
-        // 我们不能通过 "WpaControllerBuilder::new().open()" 来检查，
-        // 因为它会 "attach" 并导致 "Address in use" 竞争。
-        // 我们改为检查 socket 文件是否存在。
         let socket_path = std::path::Path::new(&config.wpa_ctrl_interface)
             .join(&config.interface_name);
 
