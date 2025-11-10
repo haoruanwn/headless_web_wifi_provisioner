@@ -379,7 +379,31 @@ impl WpaCtrlBackend {
                     if self.ap_config.wpa_update_config {
                         let _ = self.send_cmd("SAVE_CONFIG".to_string()).await;
                     }
-                    return Ok(());
+
+                    // 自动运行 DHCP 客户端
+                    tracing::info!("Connection complete. Attempting to run DHCP client (udhcpc)...");
+                    let dhcp_status = tokio::process::Command::new("udhcpc")
+                        .arg("-i")
+                        .arg(&self.ap_config.interface_name)
+                        .arg("-q") // 安静模式，减少日志
+                        .arg("-n") // 获取 IP 后立即退出，不要作为守护进程
+                        .status()
+                        .await;
+
+                    if let Ok(status) = dhcp_status {
+                        if status.success() {
+                            tracing::info!("DHCP client (udhcpc) successfully obtained an IP.");
+                        } else {
+                            tracing::warn!("DHCP client (udhcpc) exited with an error.");
+                        }
+                    } else {
+                        tracing::error!("Failed to execute 'udhcpc'. Is it installed on this board?");
+                    }
+
+                    // 自动退出程序
+                    println!("Provisioning complete. Shutting down application.");
+                    // 成功退出 (状态码 0)
+                    std::process::exit(0);
                 }
                 "ASSOCIATING" | "ASSOCIATED" | "4WAY_HANDSHAKE" | "GROUP_HANDSHAKE" => {
                     tracing::debug!("Connection in progress (state: {})...", wpa_state);

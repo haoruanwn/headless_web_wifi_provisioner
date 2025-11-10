@@ -19,8 +19,7 @@ jobs:
       matrix:
         include:
           - target: armv7-unknown-linux-musleabihf
-            asset_suffix: wpa_cli_TDM-echo-mate-armv7-musleabihf
-            features: "provisioner-daemon/backend_wpa_cli_TDM,provisioner-daemon/ui_echo_mate, provisioner-daemon/policy_on_start"
+            asset_suffix: echo-mate-armv7-musleabihf
             env_rustflags: "-C target-feature=+crt-static"
 
           # - target: armv7-unknown-linux-musleabihf
@@ -51,7 +50,7 @@ jobs:
       - name: "5. Build Static Binary"
         id: build
         env:
-          PROGRAM_NAME: "provisioner-daemon"
+          PROGRAM_NAME: "provisioner"
         run: |
           BUILD_COMMAND="cross build --target=${{ matrix.target }} --release"
           if [ -n "${{ matrix.features }}" ]; then
@@ -70,7 +69,7 @@ jobs:
           # 将目标文件名输出，供后续步骤使用
           echo "asset_path=$DEST_NAME" >> $GITHUB_OUTPUT
 
-      # --- 修改点 1: 不上传到Release，而是保存为Artifact ---
+      # --- 不上传到Release，而是保存为Artifact ---
       - name: "6. Upload Artifact"
         uses: actions/upload-artifact@v4
         with:
@@ -85,7 +84,7 @@ jobs:
     name: "Create & Publish Release"
     runs-on: ubuntu-latest
     
-    # --- 修改点 2: 依赖 build-assets Job ---
+    # --- 不依赖 build-assets Job ---
     # 确保所有构建完成后才运行
     needs: build-assets 
     
@@ -108,22 +107,18 @@ jobs:
             draft: false
             prerelease: false
 
-      # --- 修改点 3: 下载所有 Artifacts ---
+      # --- 下载所有 Artifacts ---
       - name: "3. Download All Artifacts"
         uses: actions/download-artifact@v4
         with:
           # 不指定 name，会下载所有 Artifacts
           path: artifacts # 下载到 'artifacts' 文件夹
 
-      # --- 修改点 4: 循环上传所有产物 ---
+      # --- 循环上传所有产物 ---
       - name: "4. Package & Upload All Assets"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # ------------------------------------------------
-          # 1. (新增) 打包并上传 UI 文件夹
-          # ------------------------------------------------
-          # 我们使用 tag name 来命名压缩包 (e.g., ui-assets-v0.1.0.tar.gz)
           UI_ASSET_NAME="ui-assets-${{ github.ref_name }}.tar.gz"
           
           echo "Packaging UI folder into $UI_ASSET_NAME"
@@ -142,10 +137,7 @@ jobs:
             --clobber
           
           echo "--- UI asset upload complete ---"
-          
-          # ------------------------------------------------
-          # 2. (保留) 上传所有已编译的二进制文件
-          # ------------------------------------------------
+        
           echo "--- Starting binary artifact uploads ---"
           find artifacts -type f | while read asset_path; do
             asset_name=$(basename "$asset_path")
