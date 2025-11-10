@@ -1,133 +1,142 @@
+# simple-provisioner-wpadbus
 
-# 无头设备 Web 配网服务
+一个最小化的、独立的 Rust 程序，专注于 `wpa_supplicant` D-Bus 交互和 AP 配网。
 
-## 简介
-
-本项目旨在为需要频繁移动的无头 Linux 设备（比如网络摄像头、物联网设备、小型服务器等）提供一种基于 Web 界面的 Wi-Fi 配网服务。
-
-项目设计了一个通用的抽象架构，分离了前端（UI）和后端（网络管理逻辑），并支持自定义行为策略。无论是使用 NetworkManager 进行网络管理的主流 Linux 发行版，还是使用 wpa_supplicant进行网络管理的嵌入式设备（如 Buildroot, Yocto），都可以通过替换后端实现，来灵活适配不同的前端界面。
-
-### 核心策略
-
-本项目为两种常见的硬件方案提供了接口，可以通过策略（Policy）和后端（Backend）的组合来实现：
-
-1.  **分时复用 (TDM) 方案**
-    * **适用场景：** 大部分的 Linux 设备（单无线网卡，且不支持 AP/STA 并发模式）。
-    * **工作流程：** 在进入配网操作前，先在 STA 模式进行一次 Wi-Fi 扫描并缓存列表。然后切换到 AP 模式提供 Web 配网界面。
-    * **权衡点：** 用户在 Web 界面上看到的 Wi-Fi 列表是缓存的，无法实时扫描，也无法实时反馈 Wi-Fi 链接是否成功，体验上有一定割裂。
-
-2.  **并发 (Concurrent) 方案**
-    * **适用场景：** 无线网卡支持 AP/STA 并发，或者拥有两个无线网卡的设备。
-    * **工作流程：** 一个网卡（或虚拟接口）处于 AP 模式提供热点供 Web 组网，另一个网卡（或接口）进行实时的 Wi-Fi 扫描与链接。
-    * **权衡点：** 硬件成本稍高，但用户体验（实时性）远好于 TDM 方案。
-
----
-
-## 当前支持
-
-### 后端支持
-
-* `backend_networkmanager_TDM` 主要用于带有 NetworkManager 服务的桌面或服务器发行版。
-* `backend_wpa_cl_TDM ` 依赖 `wpa_supplicant` 和 `wpa_cli` 工具，是嵌入式 Linux 环境的标准配置。
-* `backend_mock` 仅用于模拟后端行为，方便在本地进行前端 UI 调试。
-* （待补充...）
-
-###  已添加的前端主题
-
-* `ui_echo_mate`
-* `ui_radxa_x4`
-* (待补充...)
-
----
-
-## 构建说明
-
-在构建时，你需要根据目标平台，选择一个**后端 (backend)**、一个**前端 (ui)** 以及一个**策略 (policy)**。
-
-### 1. 本地测试 UI 效果
-
+交叉编译
 ```bash
-# 本地快速测试：立即进入配网（On-Start 策略）
-# 使用 mock 后端 和 echo_mate 主题
-cargo run --release --features "\
-   provisioner-daemon/backend_mock_TDM \
-   provisioner-daemon/ui_echo_mate \
-   provisioner-daemon/policy_on_start"
-
-# 使用 mock 后端 和 radxa_x4 主题
-cargo run --release --features "\
-   provisioner-daemon/backend_mock \
-   provisioner-daemon/ui_radxa_x4 \
-   provisioner-daemon/policy_on_start"
-```
-
-
-
-### 2. 本地编译（目标为 Gnu/Linux 主机）
-
-```bash
-# 场景A：使用 networkmanager 后端（TDM）并立即进入配网
-cargo build --release --features "\
-   provisioner-daemon/backend_nmdbus_TDM \
-   provisioner-daemon/ui_radxa_x4 \
-   provisioner-daemon/policy_on_start"
-
-# 场景B：使用 wpa_cli 后端（TDM）
-cargo build --release --features "\
-   provisioner-daemon/backend_wpa_cli_TDM \
-   provisioner-daemon/ui_echo_mate"
-
-# 场景C：使用 networkmanager 后端，并配置为“断线时进入配网”策略
-cargo build --release --features "\
-   provisioner-daemon/backend_networkmanager_TDM \
-   provisioner-daemon/ui_echo_mate \
-   provisioner-daemon/policy_daemon_if_disconnected"
-```
-
-### 3. 交叉编译（目标为嵌入式 Linux）
-
-此场景通常使用 `wpa_cli` 后端。
-
-#### 示例 1：使用 cargo 原生交叉编译
-
-```bash
-# 交叉编译 (目标平台为 <target>)
-# 注意：同时选择 policy
-cargo build --target=<target> --release --features "\
-   provisioner-daemon/backend_wpa_cli \
-   provisioner-daemon/ui_echo_mate \
-   provisioner-daemon/policy_on_start"
-```
-
-#### 示例 2：使用 cross 工具编译 (推荐)
-
-`cross` 工具能更好地处理 C 依赖和 musl 静态链接。
-
-```bash
-# 适用于 POSIX shell (Fedora, macOS, Linux)
-# 目标：armv7 musl 静态链接
 cross build \
    --target=armv7-unknown-linux-musleabihf \
    --release \
-   --features "\
-      provisioner-daemon/backend_wpa_cli_TDM \
-      provisioner-daemon/ui_echo_mate \
-      provisioner-daemon/policy_on_start" \
    --config 'target.armv7-unknown-linux-musleabihf.rustflags=["-C", "target-feature=+crt-static"]'
 ```
 
-------
+## 项目结构
 
-## 运行与调试
-
-设置日志级别并以 `sudo` 运行（因为需要操作网络接口）：
-
-```bash
-# POSIX shell
-sudo RUST_LOG="debug,tower_http=debug" ./target/release/provisioner-daemon
+```
+simple-provisioner-wpadbus/
+├── Cargo.toml                 # 项目依赖和配置
+├── config/
+│   └── wpa_dbus.toml         # AP 配置文件
+├── ui/                        # 前端静态文件
+│   ├── index.html
+│   ├── app.js
+│   ├── style.css
+│   └── assets/
+│       ├── logo.svg
+│       └── wifi.svg
+└── src/
+    ├── main.rs               # 主入口
+    ├── config.rs             # 配置加载
+    ├── structs.rs            # 数据结构定义
+    ├── backend.rs            # 核心后端（wpa_supplicant D-Bus）
+    └── web_server.rs         # Web 服务器（Axum）
 ```
 
+## 核心特性
+
+### 1. 最小化设计
+- **不依赖** `provisioner-core` 或 `provisioner-daemon`
+- **无 trait**：所有方法都是 `WpaDbusBackend` 的直接实现
+- **单一二进制**：`cargo build --release` 即可
+
+### 2. 纯 wpa_supplicant D-Bus 实现
+- 使用 `zbus` 库与 `wpa_supplicant` 通信
+- 直接 Scan、AddNetwork、SelectNetwork 等 D-Bus 方法调用
+- 信号监听：`ScanDone` 和 `PropertiesChanged`
+
+### 3. TDM（时分复用）模式
+- 启动时执行一次完整扫描
+- 获取网络列表后启动 AP（hostapd + dnsmasq）
+- 前端看到的始终是启动时的扫描结果（无需重新扫描）
+- 连接成功后清理 AP，进入配置好的网络
+
+### 4. Axum Web 服务器
+- `/api/scan` - 返回缓存的网络列表
+- `/api/connect` - 连接到指定网络
+- `/api/backend_kind` - 返回 `{ "kind": "tdm" }`
+- `/` 和 `/*` - 静态文件服务（使用 `tower-http`）
+
+## 编译
+
 ```bash
-# 使用 rsync 部署到你的 Arch Linux (示例)
-rsync -avz --delete target/release/provisioner-daemon archlinux:/home/hao/provisioner/
+cd simple-provisioner-wpadbus
+cargo build --release
 ```
+
+## 运行
+
+```bash
+# 需要 root 权限
+sudo ./target/release/simple-provisioner-wpadbus
+
+# 或启用日志
+RUST_LOG=debug sudo ./target/release/simple-provisioner-wpadbus
+```
+
+## 前置要求
+
+### 系统工具
+- `wpa_supplicant`（带 D-Bus 支持）
+- `hostapd`
+- `dnsmasq`
+- `ip`（iproute2）
+
+### 配置文件
+- `/etc/wpa_supplicant.conf`（用于 wpa_supplicant 启动）
+
+### D-Bus 权限
+- 需要 root 或相应的 polkit 权限以访问 `fi.w1.wpa_supplicant1` 服务
+
+## 配置
+
+编辑 `config/wpa_dbus.toml`：
+
+```toml
+ap_ssid = "Provisioner"          # AP 的 SSID
+ap_psk = "12345678"              # AP 的密码
+ap_gateway_cidr = "192.168.4.1/24"  # 网关和子网
+ap_bind_addr = "192.168.4.1:80"  # Web 服务器绑定地址
+```
+
+## 工作流程
+
+1. **启动** → 创建 `WpaDbusBackend` 实例
+2. **扫描** → 通过 D-Bus 调用 `wpa_supplicant` 进行 Wi-Fi 扫描
+3. **启动 AP** → 配置 IP、启动 hostapd 和 dnsmasq
+4. **启动 Web 服务器** → 监听 192.168.4.1:80
+5. **前端访问** → 获取网络列表、输入密码
+6. **连接** → 通过 D-Bus 与目标网络连接
+7. **清理** → 关闭 AP，恢复设置
+
+## 开发与调试
+
+### 查看日志
+```bash
+RUST_LOG=debug sudo ./target/release/simple-provisioner-wpadbus
+RUST_LOG=trace sudo ./target/release/simple-provisioner-wpadbus  # 更详细
+```
+
+### 访问前端
+在配置好的网络（192.168.4.x）中，打开浏览器访问：
+```
+http://192.168.4.1
+```
+
+### D-Bus 调试
+```bash
+# 查看 wpa_supplicant 对象
+gdbus call --system --dest fi.w1.wpa_supplicant1 --object-path /fi/w1/wpa_supplicant1 --method fi.w1.wpa_supplicant1.GetInterface wlan0
+```
+
+## 下一步：抽象与重用
+
+一旦这个 MVP 在硬件上跑通，你将获得宝贵的实战经验。此时可以：
+
+1. 基于这个实现设计完美的 `trait`
+2. 将核心逻辑提取到 `provisioner-core`
+3. 支持多个后端（wpa_cli、nmcli 等）
+4. 支持 Concurrent 模式（实时扫描）
+
+## 许可证
+
+MIT OR Apache-2.0
