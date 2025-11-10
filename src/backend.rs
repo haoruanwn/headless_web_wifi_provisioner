@@ -1,5 +1,5 @@
-use crate::config::ap_config_from_toml_str;
-use crate::structs::{ApConfig, ConnectionRequest, Network};
+use crate::config::{ap_config_from_toml_str, ApConfig};
+use crate::structs::{ConnectionRequest, Network};
 use anyhow::{anyhow, Result};
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
@@ -18,9 +18,7 @@ static GLOBAL_AP_CONFIG: Lazy<ApConfig> = Lazy::new(|| {
     ap_config_from_toml_str(CONFIG_TOML)
 });
 
-const IFACE_NAME: &str = "wlan0";
-
-// D-Bus 常量
+// D-Bus 常量（这些是固定的，不需要配置）
 const WPA_SUPPLICANT_SERVICE: &str = "fi.w1.wpa_supplicant1";
 const WPA_SUPPLICANT_PATH: &str = "/fi/w1/wpa_supplicant1";
 const WPA_SUPPLICANT_INTERFACE: &str = "fi.w1.wpa_supplicant1";
@@ -36,8 +34,23 @@ pub struct WpaDbusBackend {
 
 impl WpaDbusBackend {
     pub fn new() -> Result<Self> {
+        let config = GLOBAL_AP_CONFIG.clone();
+
+        // 创建自包含的 wpa_supplicant 配置文件
+        let update_config_str = if config.wpa_update_config { "1" } else { "0" };
+        let wpa_conf_content = format!(
+            "ctrl_interface=DIR={} GROUP={}\nupdate_config={}\n",
+            config.wpa_ctrl_interface,
+            config.wpa_group,
+            update_config_str
+        );
+        std::fs::write(&config.wpa_conf_path, wpa_conf_content.as_bytes())
+            .map_err(|e| anyhow!("Failed to write wpa_supplicant config: {}", e))?;
+
+        tracing::info!("Created wpa_supplicant config at: {}", config.wpa_conf_path);
+
         Ok(Self {
-            ap_config: Arc::new(GLOBAL_AP_CONFIG.clone()),
+            ap_config: Arc::new(config),
             hostapd: Arc::new(Mutex::new(None)),
             dnsmasq: Arc::new(Mutex::new(None)),
             conn: Arc::new(Mutex::new(None)),
@@ -82,10 +95,13 @@ impl WpaDbusBackend {
         v.into().try_into().unwrap()
     }
 
-    /// 确保 wpa_supplicant 接口路径
+    /// 确保 wpa_supplicant 接口路径可用
     async fn ensure_iface_path(&self) -> Result<OwnedObjectPath> {
         let mgr = self.root_proxy().await?;
-        let result = mgr.call_method("GetInterface", &(IFACE_NAME,)).await;
+        let iface_name = &self.ap_config.interface_name;
+
+        // 尝试获取已存在的接口
+        let result = mgr.call_method("GetInterface", &(iface_name,)).await;
         if result.is_ok() {
             let reply = result.unwrap();
             let path: OwnedObjectPath = reply
@@ -96,10 +112,13 @@ impl WpaDbusBackend {
         }
 
         tracing::info!("wpa_supplicant D-Bus interface not available, attempting to start daemon...");
+
+        // 启动 wpa_supplicant，使用配置中的参数
         let spawn_result = Command::new("wpa_supplicant")
             .arg("-B")
-            .arg(format!("-i{}", IFACE_NAME))
-            .arg("-c/etc/wpa_supplicant.conf")
+            .arg(format!("-i{}", iface_name))
+            .arg("-c")
+            .arg(&self.ap_config.wpa_conf_path)
             .spawn();
 
         match spawn_result {
@@ -113,8 +132,9 @@ impl WpaDbusBackend {
 
         tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
+        // 重试获取接口
         let reply = mgr
-            .call_method("GetInterface", &(IFACE_NAME,))
+            .call_method("GetInterface", &(iface_name,))
             .await
             .map_err(|e| anyhow!("GetInterface failed after daemon startup: {}", e))?;
         let path: OwnedObjectPath = reply
@@ -229,20 +249,16 @@ impl WpaDbusBackend {
 
     /// 启动 AP 模式
     async fn start_ap(&self) -> Result<()> {
-        let _ = Command::new("killall")
-            .arg("-9")
-            .arg("hostapd")
-            .arg("dnsmasq")
-            .arg("wpa_supplicant")
-            .status()
-            .await;
+        // 使用 stop_ap() 而不是粗暴的 killall
+        let _ = self.stop_ap().await;
 
+        // 配置 IP 地址
         let output = Command::new("ip")
             .arg("addr")
             .arg("add")
             .arg(&self.ap_config.gateway_cidr)
             .arg("dev")
-            .arg(IFACE_NAME)
+            .arg(&self.ap_config.interface_name)
             .output()
             .await?;
 
@@ -253,21 +269,36 @@ impl WpaDbusBackend {
             }
         }
 
+        // 生成 hostapd 配置
         let hostapd_conf = format!(
-            "interface={}\nssid={}\nwpa=2\nwpa_passphrase={}\nhw_mode=g\nchannel=6\nwpa_key_mgmt=WPA-PSK\nwpa_pairwise=CCMP\nrsn_pairwise=CCMP\n",
-            IFACE_NAME, self.ap_config.ssid, self.ap_config.psk
+            "interface={}\nssid={}\nwpa={}\nwpa_passphrase={}\nhw_mode={}\nchannel={}\nwpa_key_mgmt={}\nwpa_pairwise={}\nrsn_pairwise={}\n",
+            self.ap_config.interface_name,
+            self.ap_config.ssid,
+            self.ap_config.hostapd_wpa,
+            self.ap_config.psk,
+            self.ap_config.hostapd_hw_mode,
+            self.ap_config.hostapd_channel,
+            self.ap_config.hostapd_wpa_key_mgmt,
+            self.ap_config.hostapd_wpa_pairwise,
+            self.ap_config.hostapd_rsn_pairwise
         );
 
-        let conf_path = "/tmp/provisioner_hostapd.conf";
-        fs::write(conf_path, hostapd_conf.as_bytes()).await?;
+        // 写入 hostapd 配置文件
+        fs::write(&self.ap_config.hostapd_conf_path, hostapd_conf.as_bytes()).await?;
+        tracing::debug!("Created hostapd config at: {}", self.ap_config.hostapd_conf_path);
 
-        let child = Command::new("hostapd").arg(conf_path).arg("-B").spawn()?;
+        // 启动 hostapd
+        let child = Command::new("hostapd")
+            .arg(&self.ap_config.hostapd_conf_path)
+            .arg("-B")
+            .spawn()?;
         *self.hostapd.lock().await = Some(child);
 
+        // 启动 dnsmasq
         let ap_ip_only = self.ap_config.gateway_cidr.split('/').next().unwrap_or("");
         let dnsmasq_child = Command::new("dnsmasq")
-            .arg(format!("--interface={}", IFACE_NAME))
-            .arg("--dhcp-range=192.168.4.100,192.168.4.200,12h")
+            .arg(format!("--interface={}", self.ap_config.interface_name))
+            .arg(format!("--dhcp-range={}", self.ap_config.dhcp_range))
             .arg(format!("--address=/#/{}", ap_ip_only))
             .arg("--no-resolv")
             .arg("--no-hosts")
@@ -275,11 +306,13 @@ impl WpaDbusBackend {
             .spawn()?;
 
         *self.dnsmasq.lock().await = Some(dnsmasq_child);
+        tracing::info!("AP started successfully on {}", self.ap_config.interface_name);
         Ok(())
     }
 
     /// 停止 AP 模式
     async fn stop_ap(&self) -> Result<()> {
+        // 杀死我们启动的进程
         if let Some(mut child) = self.dnsmasq.lock().await.take() {
             let _ = child.kill().await;
         }
@@ -287,12 +320,13 @@ impl WpaDbusBackend {
             let _ = child.kill().await;
         }
 
+        // 移除 IP 地址配置
         let output = Command::new("ip")
             .arg("addr")
             .arg("del")
             .arg(&self.ap_config.gateway_cidr)
             .arg("dev")
-            .arg(IFACE_NAME)
+            .arg(&self.ap_config.interface_name)
             .output()
             .await?;
 
@@ -303,7 +337,10 @@ impl WpaDbusBackend {
             }
         }
 
-        let _ = fs::remove_file("/tmp/provisioner_hostapd.conf").await;
+        // 清理 hostapd 配置文件
+        let _ = fs::remove_file(&self.ap_config.hostapd_conf_path).await;
+
+        tracing::info!("AP stopped on {}", self.ap_config.interface_name);
         Ok(())
     }
 

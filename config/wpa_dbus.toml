@@ -1,4 +1,38 @@
+# AP 基本配置 
 ap_ssid = "Provisioner"
 ap_psk = "12345678"
 ap_gateway_cidr = "192.168.4.1/24"
 ap_bind_addr = "192.168.4.1:80"
+
+# 网络接口配置 
+interface_name = "wlan0"
+
+# DHCP (dnsmasq) 配置 
+# 注意：必须和 ap_gateway_cidr 匹配（同一网段）
+dhcp_range = "192.168.4.100,192.168.4.200,12h"
+
+# 自包含的配置文件路径 
+# （使用 /tmp 或 /run 目录，避免依赖 /etc 系统配置）
+hostapd_conf_path = "/tmp/provisioner_hostapd.conf"
+wpa_conf_path = "/tmp/provisioner_wpa.conf"
+
+# wpa_supplicant 控制接口配置 
+wpa_ctrl_interface = "/var/run/wpa_supplicant"
+# wpa_supplicant GROUP 名称（需要与系统一致）
+wpa_group = "netdev"
+# wpa_supplicant 更新配置选项
+wpa_update_config = true
+
+# hostapd 无线配置 
+# IEEE 802.11 频段 (a=5GHz, b=2.4GHz, g=2.4GHz)
+hostapd_hw_mode = "g"
+# 频道号 (2.4GHz: 1-13/14, 5GHz: 36-165)
+hostapd_channel = 6
+# WPA 版本 (1=WPA, 2=WPA2, 3=WPA3)
+hostapd_wpa = 2
+# WPA 密钥管理 (WPA-PSK, WPA-EAP 等)
+hostapd_wpa_key_mgmt = "WPA-PSK"
+# WPA 单播密码 (CCMP, TKIP 等)
+hostapd_wpa_pairwise = "CCMP"
+# RSN 单播密码 (CCMP, TKIP 等)
+hostapd_rsn_pairwise = "CCMP"
