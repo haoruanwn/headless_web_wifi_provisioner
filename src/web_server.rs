@@ -1,4 +1,4 @@
-use crate::backend::WpaDbusBackend;
+use crate::backend::WpaCtrlBackend;
 use crate::structs::{ConnectionRequest, Network};
 use axum::{
     Router,
@@ -13,14 +13,14 @@ use tower_http::services::ServeDir;
 
 /// Web 服务器状态
 struct AppState {
-    backend: Arc<WpaDbusBackend>,
+    backend: Arc<WpaCtrlBackend>,
     // TDM 模式：缓存启动时扫描的网络列表
     initial_networks: Arc<Mutex<Vec<Network>>>,
 }
 
 /// 启动 Web 服务器（TDM 模式）
 pub async fn run_server(
-    backend: Arc<WpaDbusBackend>,
+    backend: Arc<WpaCtrlBackend>,
     initial_networks: Vec<Network>,
 ) -> anyhow::Result<()> {
     let app_state = Arc::new(AppState {

@@ -1,17 +1,13 @@
 use crate::config::{ApConfig, ap_config_from_toml_str};
 use crate::structs::{ConnectionRequest, Network};
-use anyhow::{Result, anyhow};
-use futures_util::stream::StreamExt;
+use anyhow::{Result, anyhow, Context};
 use once_cell::sync::Lazy;
-use std::collections::HashMap;
-use std::convert::TryInto;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
 use tokio::fs;
 use tokio::process::Command;
-use tokio::sync::Mutex;
-use zbus::zvariant::{OwnedObjectPath, OwnedValue, Value};
-use zbus::{Connection, Proxy};
+use tokio::sync::broadcast;
+use wpa_ctrl::{WpaController, WpaControllerBuilder};
 
 // 从配置文件加载 AP 配置
 static GLOBAL_AP_CONFIG: Lazy<ApConfig> = Lazy::new(|| {
@@ -19,40 +15,54 @@ static GLOBAL_AP_CONFIG: Lazy<ApConfig> = Lazy::new(|| {
     ap_config_from_toml_str(CONFIG_TOML)
 });
 
-// D-Bus 常量（这些是固定的，不需要配置）
-const WPA_SUPPLICANT_SERVICE: &str = "fi.w1.wpa_supplicant1";
-const WPA_SUPPLICANT_PATH: &str = "/fi/w1/wpa_supplicant1";
-const WPA_SUPPLICANT_INTERFACE: &str = "fi.w1.wpa_supplicant1";
-
-/// wpa_supplicant D-Bus 后端实现
-#[derive(Debug)]
-pub struct WpaDbusBackend {
+/// wpa_supplicant 控制套接字后端实现
+pub struct WpaCtrlBackend {
     ap_config: Arc<ApConfig>,
-    hostapd: Arc<Mutex<Option<tokio::process::Child>>>,
-    dnsmasq: Arc<Mutex<Option<tokio::process::Child>>>,
-    conn: Arc<Mutex<Option<Connection>>>,
+    hostapd: Arc<tokio::sync::Mutex<Option<tokio::process::Child>>>,
+    dnsmasq: Arc<tokio::sync::Mutex<Option<tokio::process::Child>>>,
+    cmd_ctrl: Arc<Mutex<Option<WpaController>>>,
+    event_tx: broadcast::Sender<String>,
 }
 
-impl WpaDbusBackend {
+impl WpaCtrlBackend {
     pub fn new() -> Result<Self> {
         let config = GLOBAL_AP_CONFIG.clone();
 
-        // 创建自包含的 wpa_supplicant 配置文件
+        // 创建 wpa_supplicant 配置文件，使用控制套接字接口
         let update_config_str = if config.wpa_update_config { "1" } else { "0" };
         let wpa_conf_content = format!(
-            "ctrl_interface=dbus\nupdate_config={}\n",
-            update_config_str
+            "ctrl_interface=DIR={} GROUP={}\nupdate_config={}\n",
+            config.wpa_ctrl_interface, config.wpa_group, update_config_str
         );
         std::fs::write(&config.wpa_conf_path, wpa_conf_content.as_bytes())
-            .map_err(|e| anyhow!("Failed to write wpa_supplicant config: {}", e))?;
+            .context("Failed to write wpa_supplicant config")?;
 
         tracing::info!("Created wpa_supplicant config at: {}", config.wpa_conf_path);
 
+        // 确保 wpa_supplicant 守护进程在运行
+        Self::ensure_wpa_supplicant_daemon(&config)?;
+
+        // 建立用于命令的 WpaController 连接
+        tracing::debug!("Connecting CMD controller to {}", config.interface_name);
+        
+        let cmd_ctrl = WpaControllerBuilder::new()
+            .open(&config.interface_name)
+            .context("Failed to connect WpaController socket. Is wpa_supplicant running?")?;
+
+        let cmd_ctrl_arc = Arc::new(Mutex::new(Some(cmd_ctrl)));
+
+        // 创建一个广播通道用于事件
+        let (event_tx, _) = broadcast::channel(32);
+
+        // 启动一个专用线程来监听事件
+        Self::start_event_listener_thread(&config, event_tx.clone())?;
+
         Ok(Self {
             ap_config: Arc::new(config),
-            hostapd: Arc::new(Mutex::new(None)),
-            dnsmasq: Arc::new(Mutex::new(None)),
-            conn: Arc::new(Mutex::new(None)),
+            hostapd: Arc::new(tokio::sync::Mutex::new(None)),
+            dnsmasq: Arc::new(tokio::sync::Mutex::new(None)),
+            cmd_ctrl: cmd_ctrl_arc,
+            event_tx,
         })
     }
 
@@ -60,208 +70,199 @@ impl WpaDbusBackend {
         self.ap_config.clone()
     }
 
-    /// 确保 D-Bus 连接存在
-    async fn ensure_conn(&self) -> Result<Connection> {
-        if let Some(c) = self.conn.lock().await.clone() {
-            return Ok(c);
-        }
-        let c = Connection::system()
-            .await
-            .map_err(|e| anyhow!("DBus connect failed: {}", e))?;
-        *self.conn.lock().await = Some(c.clone());
-        Ok(c)
-    }
-
-    /// 获取根 DBus 代理
-    async fn root_proxy(&self) -> Result<Proxy<'_>> {
-        let conn = self.ensure_conn().await?;
-        Proxy::new(
-            &conn,
-            WPA_SUPPLICANT_SERVICE,
-            WPA_SUPPLICANT_PATH,
-            WPA_SUPPLICANT_INTERFACE,
-        )
-        .await
-        .map_err(|e| anyhow!("proxy create error: {}", e))
-    }
-
-    /// DBus Value 转换辅助函数
-    #[inline]
-    fn ov<'a, V>(v: V) -> OwnedValue
-    where
-        V: Into<Value<'a>>,
-    {
-        v.into().try_into().unwrap()
-    }
-
-    /// 确保 wpa_supplicant 接口路径可用
-    async fn ensure_iface_path(&self) -> Result<OwnedObjectPath> {
-        let mgr = self.root_proxy().await?;
-        let iface_name = &self.ap_config.interface_name;
-
-        // 尝试获取已存在的接口
-        let result = mgr.call_method("GetInterface", &(iface_name,)).await;
-        if result.is_ok() {
-            let reply = result.unwrap();
-            let path: OwnedObjectPath = reply
-                .body()
-                .deserialize()
-                .map_err(|e| anyhow!("GetInterface decode failed: {}", e))?;
-            return Ok(path);
+    /// 辅助函数：确保 wpa_supplicant 在运行
+    fn ensure_wpa_supplicant_daemon(config: &ApConfig) -> Result<()> {
+        // 尝试连接一下，看是否已在运行
+        if WpaControllerBuilder::new()
+            .open(&config.interface_name)
+            .is_ok()
+        {
+            tracing::debug!("wpa_supplicant already running.");
+            return Ok(());
         }
 
-        tracing::info!(
-            "wpa_supplicant D-Bus interface not available, attempting to start daemon..."
-        );
+        tracing::info!("wpa_supplicant not running, attempting to start...");
 
-        // [改进] 先尝试优雅地清理残留的 wpa_supplicant（不使用 -9）
-        // 这样可以在程序崩溃或被杀死后保证一个更干净的启动环境
-        let _ = Command::new("killall").arg("wpa_supplicant").status().await;
+        // 清理残留进程
+        let _ = std::process::Command::new("killall")
+            .arg("wpa_supplicant")
+            .status();
 
-        // 启动 wpa_supplicant，使用配置中的参数并启用 -u（让 wpa_supplicant 连接到 system dbus）
-        let spawn_result = Command::new("wpa_supplicant")
+        // 启动 wpa_supplicant 守护进程
+        let status = std::process::Command::new("wpa_supplicant")
             .arg("-B")
-            .arg(format!("-i{}", iface_name))
+            .arg(format!("-i{}", config.interface_name))
             .arg("-c")
-            .arg(&self.ap_config.wpa_conf_path)
-            .spawn();
+            .arg(&config.wpa_conf_path)
+            .status()
+            .context("Failed to spawn wpa_supplicant daemon")?;
 
-        match spawn_result {
-            Ok(_) => {
-                tracing::debug!("wpa_supplicant daemon started, waiting for D-Bus interface...");
-            }
-            Err(e) => {
-                tracing::warn!("Failed to spawn wpa_supplicant: {}", e);
-            }
+        if !status.success() {
+            return Err(anyhow!("wpa_supplicant daemon failed to start"));
         }
 
-        // 使用带超时的重试循环替代固定 sleep。总超时可配置，这里使用 15s。
-        let start = Instant::now();
-        let timeout = Duration::from_secs(15);
-        loop {
-            match mgr.call_method("GetInterface", &(iface_name,)).await {
-                Ok(reply) => {
-                    let path: OwnedObjectPath = reply
-                        .body()
-                        .deserialize()
-                        .map_err(|e| anyhow!("GetInterface decode failed: {}", e))?;
-                    return Ok(path);
-                }
-                Err(_) => {
-                    if start.elapsed() > timeout {
-                        return Err(anyhow!(
-                            "GetInterface failed after daemon startup: timeout waiting for registration"
-                        ));
-                    }
-                    tokio::time::sleep(Duration::from_secs(1)).await;
-                }
-            }
-        }
+        // 等待 socket 文件出现
+        std::thread::sleep(Duration::from_secs(2));
+        Ok(())
     }
 
-    /// 内部扫描方法
-    async fn scan_internal(&self) -> Result<Vec<Network>> {
-        let iface_path = self.ensure_iface_path().await?;
-        let conn = self.ensure_conn().await?;
-        let iface = Proxy::new(
-            &conn,
-            WPA_SUPPLICANT_SERVICE,
-            iface_path.as_ref(),
-            "fi.w1.wpa_supplicant1.Interface",
-        )
-        .await
-        .map_err(|e| anyhow!("iface proxy error: {}", e))?;
+    /// 辅助函数：在专用线程中监听 wpa_supplicant 事件
+    fn start_event_listener_thread(config: &ApConfig, tx: broadcast::Sender<String>) -> Result<()> {
+        let iface_name = config.interface_name.clone();
 
-        let mut scan_done_stream = iface
-            .receive_signal("ScanDone")
-            .await
-            .map_err(|e| anyhow!("Failed to listen for ScanDone: {}", e))?;
+        std::thread::spawn(move || {
+            tracing::debug!("Event listener thread started.");
 
-        // 触发扫描
-        let opts: HashMap<String, OwnedValue> = HashMap::new();
-        iface
-            .call_method("Scan", &(opts))
-            .await
-            .map_err(|e| anyhow!("Scan failed: {}", e))?;
+            // 无限重连循环，确保鲁棒性
+            loop {
+                let mut event_ctrl = match WpaControllerBuilder::new()
+                    .open(&iface_name)
+                {
+                    Ok(ctrl) => ctrl,
+                    Err(e) => {
+                        tracing::error!("Event controller connect failed, retrying in 5s: {}", e);
+                        std::thread::sleep(Duration::from_secs(5));
+                        continue;
+                    }
+                };
 
-        let fut = async {
-            if let Some(signal) = scan_done_stream.next().await {
-                let (success,): (bool,) = signal
-                    .body()
-                    .deserialize()
-                    .map_err(|e| anyhow!("Invalid ScanDone body: {}", e))?;
-                if success {
-                    return Ok(());
+                // 对于事件监听，我们需要持续接收消息
+                // wpa-ctrl 不需要显式的 "attach"，它会发送事件
+
+                tracing::info!("Event listener connected to wpa_supplicant.");
+
+                // 阻塞循环，接收事件
+                let mut recv_err_count = 0;
+                loop {
+                    match event_ctrl.recv() {
+                        Ok(Some(msg)) => {
+                            let msg_str = msg.raw.to_string();
+                            recv_err_count = 0;
+                            tracing::trace!(event = %msg_str, "Received wpa_event");
+                            if tx.send(msg_str).is_err() {
+                                tracing::warn!("No listeners for wpa_event");
+                            }
+                        }
+                        Ok(None) => {
+                            tracing::trace!("Event listener received None");
+                            recv_err_count += 1;
+                            if recv_err_count > 3 {
+                                tracing::warn!("Too many empty receives. Reconnecting...");
+                                break;
+                            }
+                            std::thread::sleep(Duration::from_millis(100));
+                        }
+                        Err(e) => {
+                            tracing::warn!("Event listener recv error: {}. Reconnecting...", e);
+                            break;
+                        }
+                    }
                 }
+
+                tracing::warn!("Event listener detached. wpa_supplicant may have exited. Re-attaching in 500ms...");
+                std::thread::sleep(Duration::from_millis(500));
             }
-            Err(anyhow!("ScanDone signal not received or scan failed"))
-        };
+        });
 
-        match tokio::time::timeout(std::time::Duration::from_secs(15), fut).await {
-            Ok(Ok(_)) => (),
-            Ok(Err(e)) => return Err(e),
-            Err(_) => return Err(anyhow!("Scan timed out")),
-        }
+        Ok(())
+    }
 
-        // 读取 BSS 列表
-        let bss_paths: Vec<OwnedObjectPath> = iface
-            .get_property::<Vec<OwnedObjectPath>>("BSSs")
-            .await
-            .map_err(|e| anyhow!("Get BSSs failed: {}", e))?;
-
-        let conn = self.ensure_conn().await?;
-        let mut networks = Vec::new();
-        for bss_path in bss_paths {
-            let bss = Proxy::new(
-                &conn,
-                WPA_SUPPLICANT_SERVICE,
-                bss_path.as_ref(),
-                "fi.w1.wpa_supplicant1.BSS",
-            )
-            .await
-            .map_err(|e| anyhow!("BSS proxy error: {}", e))?;
-
-            // 获取 SSID
-            let ssid_bytes = match bss.get_property::<Vec<u8>>("SSID").await {
-                Ok(bytes) => bytes,
-                Err(e) => {
-                    tracing::warn!("Failed to get SSID for BSS {:?}: {}", bss_path, e);
-                    continue;
+    /// 内部函数：发送一个命令并获取回复
+    /// 这是阻塞 I/O，所以必须在 spawn_blocking 中运行
+    async fn send_cmd(&self, cmd: String) -> Result<String> {
+        let ctrl_clone = self.cmd_ctrl.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut ctrl_opt = ctrl_clone.lock().unwrap();
+            if let Some(ref mut ctrl) = *ctrl_opt {
+                // 使用 WpaControlReq 来发送原始命令
+                use wpa_ctrl::WpaControlReq;
+                
+                ctrl.request(WpaControlReq::raw(&cmd))
+                    .map_err(|e| anyhow!("wpa_ctrl request failed: {}", e))?;
+                
+                // 然后接收回复
+                match ctrl.recv() {
+                    Ok(Some(msg)) => Ok(msg.raw.to_string()),
+                    Ok(None) => Err(anyhow!("No response received")),
+                    Err(e) => Err(anyhow!("recv failed: {}", e)),
                 }
-            };
+            } else {
+                Err(anyhow!("WpaController not available"))
+            }
+        })
+        .await
+        .context("spawn_blocking task failed")?
+    }
 
-            if ssid_bytes.is_empty() {
+    /// 辅助函数：解析 SCAN_RESULTS 的输出
+    /// 格式: bssid / frequency / signal level / flags / ssid
+    fn parse_scan_results(output: &str) -> Result<Vec<Network>> {
+        let mut networks = Vec::new();
+        for line in output.lines().skip(1) {
+            let parts: Vec<&str> = line.split('\t').collect();
+            if parts.len() < 5 {
                 continue;
             }
 
-            // 获取信号强度
-            let signal_dbm: i16 = bss.get_property::<i16>("Signal").await.unwrap_or(-100);
+            let signal_dbm: i16 = parts[2].parse().unwrap_or(-100);
+            let flags = parts[3];
+            let ssid = parts[4].to_string();
 
-            // 获取安全信息
-            let wpa: HashMap<String, OwnedValue> =
-                bss.get_property("WPA").await.unwrap_or_default();
-            let rsn: HashMap<String, OwnedValue> =
-                bss.get_property("RSN").await.unwrap_or_default();
+            if ssid.is_empty() {
+                continue;
+            }
 
-            let security = if !rsn.is_empty() {
+            let security = if flags.contains("WPA2") {
                 "WPA2".to_string()
-            } else if !wpa.is_empty() {
+            } else if flags.contains("WPA") {
                 "WPA".to_string()
             } else {
                 "Open".to_string()
             };
 
-            let ssid = String::from_utf8(ssid_bytes.clone())
-                .unwrap_or_else(|_| format!("{:X?}", ssid_bytes));
             let signal_percent = ((signal_dbm.clamp(-100, -50) + 100) * 2) as u8;
+
             networks.push(Network {
                 ssid,
                 signal: signal_percent,
                 security,
             });
         }
-
         Ok(networks)
+    }
+
+    /// 内部扫描方法
+    async fn scan_internal(&self) -> Result<Vec<Network>> {
+        // 订阅事件
+        let mut rx = self.event_tx.subscribe();
+
+        tracing::debug!("Sending SCAN command...");
+        self.send_cmd("SCAN".to_string()).await?;
+
+        // 异步等待扫描结果事件
+        let fut = async {
+            loop {
+                match rx.recv().await {
+                    Ok(event) if event.contains("CTRL-EVENT-SCAN-RESULTS") => {
+                        return Ok::<(), anyhow::Error>(());
+                    }
+                    Ok(_) => continue,
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(e) => return Err(anyhow!("recv error: {}", e)),
+                }
+            }
+        };
+
+        // 超时
+        match tokio::time::timeout(Duration::from_secs(15), fut).await {
+            Ok(Ok(_)) => tracing::debug!("Scan results event received."),
+            Ok(Err(e)) => return Err(anyhow!("Failed waiting for scan event: {}", e)),
+            Err(_) => return Err(anyhow!("Scan timed out")),
+        }
+
+        // 获取结果并解析
+        let results_str = self.send_cmd("SCAN_RESULTS".to_string()).await?;
+        Self::parse_scan_results(&results_str)
     }
 
     /// 启动 AP 模式
@@ -383,81 +384,63 @@ impl WpaDbusBackend {
         let _ = self.stop_ap().await;
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-        let iface_path = self.ensure_iface_path().await?;
-        let conn = self.ensure_conn().await?;
-        let iface = Proxy::new(
-            &conn,
-            WPA_SUPPLICANT_SERVICE,
-            iface_path.as_ref(),
-            "fi.w1.wpa_supplicant1.Interface",
-        )
-        .await
-        .map_err(|e| anyhow!("iface proxy error: {}", e))?;
+        // 订阅事件
+        let mut rx = self.event_tx.subscribe();
 
-        // 构建网络设置
-        let mut net: HashMap<String, OwnedValue> = HashMap::new();
-        net.insert("ssid".into(), Self::ov(req.ssid.as_bytes().to_vec()));
+        tracing::debug!("Adding new network...");
+        let net_id_str = self.send_cmd("ADD_NETWORK".to_string()).await?;
+        let net_id = net_id_str.trim().parse::<u32>()
+            .context("Failed to parse ADD_NETWORK response")?;
+
+        tracing::debug!(net_id, "Configuring network...");
+
+        // 设置 SSID
+        self.send_cmd(format!("SET_NETWORK {} ssid \"{}\"", net_id, req.ssid)).await?;
+
+        // 设置密码或开放网络
         if req.password.is_empty() {
-            net.insert("key_mgmt".into(), Self::ov("NONE"));
+            self.send_cmd(format!("SET_NETWORK {} key_mgmt NONE", net_id)).await?;
         } else {
-            net.insert("key_mgmt".into(), Self::ov("WPA-PSK"));
-            net.insert("psk".into(), Self::ov(req.password.to_string()));
+            self.send_cmd(format!("SET_NETWORK {} psk \"{}\"", net_id, req.password)).await?;
         }
 
-        // AddNetwork
-        let reply = iface
-            .call_method("AddNetwork", &(net))
-            .await
-            .map_err(|e| anyhow!("AddNetwork failed: {}", e))?;
-        let net_path: OwnedObjectPath = reply
-            .body()
-            .deserialize()
-            .map_err(|e| anyhow!("AddNetwork decode failed: {}", e))?;
+        // 启用网络
+        self.send_cmd(format!("ENABLE_NETWORK {}", net_id)).await?;
 
-        // SelectNetwork
-        let _ = iface
-            .call_method("SelectNetwork", &(net_path.as_ref(),))
-            .await
-            .map_err(|e| anyhow!("SelectNetwork failed: {}", e))?;
-
-        let mut props_stream = iface
-            .receive_signal("PropertiesChanged")
-            .await
-            .map_err(|e| anyhow!("Failed to listen for PropertiesChanged: {}", e))?;
-
+        // 异步等待连接成功事件
         let fut = async {
-            while let Some(signal) = props_stream.next().await {
-                match signal
-                    .body()
-                    .deserialize::<(String, HashMap<String, Value>, Vec<String>)>()
-                {
-                    Ok((iface_name, changed_props, _invalidated_props)) => {
-                        if iface_name == "fi.w1.wpa_supplicant1.Interface" {
-                            if let Some(state) = changed_props.get("State") {
-                                if let Ok(state_str) = <&str>::try_from(state) {
-                                    if state_str == "completed" {
-                                        return Ok(());
-                                    }
-                                }
-                            }
+            loop {
+                match rx.recv().await {
+                    Ok(event) => {
+                        if event.contains("CTRL-EVENT-CONNECTED") {
+                            return Ok::<(), anyhow::Error>(());
+                        }
+                        if event.contains("CTRL-EVENT-NETWORK-NOT-FOUND")
+                            || event.contains("CTRL-EVENT-AUTH-REJECT")
+                        {
+                            return Err(anyhow!("Connection failed: {}", event));
                         }
                     }
-                    Err(e) => {
-                        return Err(anyhow!("Invalid PropertiesChanged body: {}", e));
-                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
+                    Err(e) => return Err(anyhow!("recv error: {}", e)),
                 }
             }
-            Err(anyhow!("PropertiesChanged stream ended unexpectedly"))
         };
 
-        match tokio::time::timeout(std::time::Duration::from_secs(30), fut).await {
-            Ok(Ok(_)) => Ok(()),
+        // 超时
+        match tokio::time::timeout(Duration::from_secs(30), fut).await {
+            Ok(Ok(_)) => {
+                tracing::info!("Connection successful!");
+                // 成功后，可以选择保存配置
+                if self.ap_config.wpa_update_config {
+                    let _ = self.send_cmd("SAVE_CONFIG".to_string()).await;
+                }
+                Ok(())
+            }
             Ok(Err(e)) => Err(e),
             Err(_) => {
                 // 超时：清理网络并尝试恢复 AP
-                let _ = iface
-                    .call_method("RemoveNetwork", &(net_path.as_ref(),))
-                    .await;
+                let _ = self.send_cmd(format!("REMOVE_NETWORK {}", net_id)).await;
                 let _ = self.start_ap().await;
                 Err(anyhow!("Connection timed out"))
             }

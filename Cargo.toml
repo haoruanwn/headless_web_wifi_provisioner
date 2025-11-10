@@ -13,10 +13,8 @@ tokio = { version = "1", features = ["full"] }
 axum = "0.8.6"
 tower-http = { version = "0.6.6", features = ["fs"] }
 
-# D-Bus 通信
-zbus = { version = "5.12.0", features = ["tokio"] }
-zbus_macros = "5.12.0"
-futures-util = "0.3"
+# wpa_supplicant 控制接口
+wpa-ctrl = "0.2.1"
 
 # 序列化与反序列化
 serde = { version = "1", features = ["derive"] }

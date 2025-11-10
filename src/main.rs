@@ -4,7 +4,7 @@ mod structs;
 mod web_server;
 
 use anyhow::Result;
-use backend::WpaDbusBackend;
+use backend::WpaCtrlBackend;
 use std::sync::Arc;
 
 #[tokio::main]
@@ -14,13 +14,13 @@ async fn main() -> Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    tracing::info!("🚀 Starting simple-provisioner-wpadbus...");
+    tracing::info!("🚀 Starting provisioner with wpa_ctrl backend...");
 
     // 创建后端实例
-    let backend = Arc::new(WpaDbusBackend::new()?);
+    let backend = Arc::new(WpaCtrlBackend::new()?);
 
     // 执行 TDM 启动序列：扫描 -> 启动 AP
-    tracing::info!("📡 Executing initial D-Bus scan and starting AP...");
+    tracing::info!("📡 Executing initial scan and starting AP...");
     let initial_networks = match backend.setup_and_scan().await {
         Ok(networks) => {
             tracing::info!(
