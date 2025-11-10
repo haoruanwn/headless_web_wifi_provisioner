@@ -6,7 +6,6 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::fs;
 use tokio::process::Command;
-use tokio::sync::broadcast;
 use wpa_ctrl::{WpaController, WpaControllerBuilder};
 
 // 从配置文件加载 AP 配置
@@ -15,13 +14,12 @@ static GLOBAL_AP_CONFIG: Lazy<ApConfig> = Lazy::new(|| {
     ap_config_from_toml_str(CONFIG_TOML)
 });
 
-/// wpa_supplicant 控制套接字后端实现
+/// wpa_supplicant 控制套接字后端实现（轮询模式）
 pub struct WpaCtrlBackend {
     ap_config: Arc<ApConfig>,
     hostapd: Arc<tokio::sync::Mutex<Option<tokio::process::Child>>>,
     dnsmasq: Arc<tokio::sync::Mutex<Option<tokio::process::Child>>>,
     cmd_ctrl: Arc<Mutex<Option<WpaController>>>,
-    event_tx: broadcast::Sender<String>,
 }
 
 impl WpaCtrlBackend {
@@ -51,18 +49,11 @@ impl WpaCtrlBackend {
 
         let cmd_ctrl_arc = Arc::new(Mutex::new(Some(cmd_ctrl)));
 
-        // 创建一个广播通道用于事件
-        let (event_tx, _) = broadcast::channel(32);
-
-        // 启动一个专用线程来监听事件
-        Self::start_event_listener_thread(&config, event_tx.clone())?;
-
         Ok(Self {
             ap_config: Arc::new(config),
             hostapd: Arc::new(tokio::sync::Mutex::new(None)),
             dnsmasq: Arc::new(tokio::sync::Mutex::new(None)),
             cmd_ctrl: cmd_ctrl_arc,
-            event_tx,
         })
     }
 
@@ -72,16 +63,19 @@ impl WpaCtrlBackend {
 
     /// 辅助函数：确保 wpa_supplicant 在运行
     fn ensure_wpa_supplicant_daemon(config: &ApConfig) -> Result<()> {
-        // 尝试连接一下，看是否已在运行
-        if WpaControllerBuilder::new()
-            .open(&config.interface_name)
-            .is_ok()
-        {
-            tracing::debug!("wpa_supplicant already running.");
+        // [!!] 关键修复：
+        // 我们不能通过 "WpaControllerBuilder::new().open()" 来检查，
+        // 因为它会 "attach" 并导致 "Address in use" 竞争。
+        // 我们改为检查 socket 文件是否存在。
+        let socket_path = std::path::Path::new(&config.wpa_ctrl_interface)
+            .join(&config.interface_name);
+
+        if socket_path.exists() {
+            tracing::debug!("wpa_supplicant socket found at {:?}. Assuming it's running.", socket_path);
             return Ok(());
         }
 
-        tracing::info!("wpa_supplicant not running, attempting to start...");
+        tracing::info!("wpa_supplicant socket not found, attempting to start...");
 
         // 清理残留进程
         let _ = std::process::Command::new("killall")
@@ -102,68 +96,8 @@ impl WpaCtrlBackend {
         }
 
         // 等待 socket 文件出现
+        tracing::info!("wpa_supplicant daemon started. Waiting for socket file...");
         std::thread::sleep(Duration::from_secs(2));
-        Ok(())
-    }
-
-    /// 辅助函数：在专用线程中监听 wpa_supplicant 事件
-    fn start_event_listener_thread(config: &ApConfig, tx: broadcast::Sender<String>) -> Result<()> {
-        let iface_name = config.interface_name.clone();
-
-        std::thread::spawn(move || {
-            tracing::debug!("Event listener thread started.");
-
-            // 无限重连循环，确保鲁棒性
-            loop {
-                let mut event_ctrl = match WpaControllerBuilder::new()
-                    .open(&iface_name)
-                {
-                    Ok(ctrl) => ctrl,
-                    Err(e) => {
-                        tracing::error!("Event controller connect failed, retrying in 5s: {}", e);
-                        std::thread::sleep(Duration::from_secs(5));
-                        continue;
-                    }
-                };
-
-                // 对于事件监听，我们需要持续接收消息
-                // wpa-ctrl 不需要显式的 "attach"，它会发送事件
-
-                tracing::info!("Event listener connected to wpa_supplicant.");
-
-                // 阻塞循环，接收事件
-                let mut recv_err_count = 0;
-                loop {
-                    match event_ctrl.recv() {
-                        Ok(Some(msg)) => {
-                            let msg_str = msg.raw.to_string();
-                            recv_err_count = 0;
-                            tracing::trace!(event = %msg_str, "Received wpa_event");
-                            if tx.send(msg_str).is_err() {
-                                tracing::warn!("No listeners for wpa_event");
-                            }
-                        }
-                        Ok(None) => {
-                            tracing::trace!("Event listener received None");
-                            recv_err_count += 1;
-                            if recv_err_count > 3 {
-                                tracing::warn!("Too many empty receives. Reconnecting...");
-                                break;
-                            }
-                            std::thread::sleep(Duration::from_millis(100));
-                        }
-                        Err(e) => {
-                            tracing::warn!("Event listener recv error: {}. Reconnecting...", e);
-                            break;
-                        }
-                    }
-                }
-
-                tracing::warn!("Event listener detached. wpa_supplicant may have exited. Re-attaching in 500ms...");
-                std::thread::sleep(Duration::from_millis(500));
-            }
-        });
-
         Ok(())
     }
 
@@ -231,36 +165,16 @@ impl WpaCtrlBackend {
         Ok(networks)
     }
 
-    /// 内部扫描方法
+    /// 内部扫描方法（轮询模式）
     async fn scan_internal(&self) -> Result<Vec<Network>> {
-        // 订阅事件
-        let mut rx = self.event_tx.subscribe();
-
         tracing::debug!("Sending SCAN command...");
         self.send_cmd("SCAN".to_string()).await?;
 
-        // 异步等待扫描结果事件
-        let fut = async {
-            loop {
-                match rx.recv().await {
-                    Ok(event) if event.contains("CTRL-EVENT-SCAN-RESULTS") => {
-                        return Ok::<(), anyhow::Error>(());
-                    }
-                    Ok(_) => continue,
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(e) => return Err(anyhow!("recv error: {}", e)),
-                }
-            }
-        };
-
-        // 超时
-        match tokio::time::timeout(Duration::from_secs(15), fut).await {
-            Ok(Ok(_)) => tracing::debug!("Scan results event received."),
-            Ok(Err(e)) => return Err(anyhow!("Failed waiting for scan event: {}", e)),
-            Err(_) => return Err(anyhow!("Scan timed out")),
-        }
-
-        // 获取结果并解析
+        // 固定等待 10 秒以确保扫描完成
+        tracing::debug!("Waiting 10 seconds for scan results...");
+        tokio::time::sleep(Duration::from_secs(10)).await;
+        
+        tracing::debug!("Scan wait complete, fetching results.");
         let results_str = self.send_cmd("SCAN_RESULTS".to_string()).await?;
         Self::parse_scan_results(&results_str)
     }
@@ -370,22 +284,36 @@ impl WpaCtrlBackend {
 
     /// 公共方法：扫描并启动 AP（TDM 模式）
     pub async fn setup_and_scan(&self) -> Result<Vec<Network>> {
-        let networks = self.scan_internal().await?;
-        if networks.is_empty() {
-            return Err(anyhow!("Initial scan returned no networks"));
+        let mut networks;
+        loop {
+            // 1. 尝试执行内部扫描
+            // (scan_internal 内部已经包含了 10 秒的等待)
+            println!("Attempting to scan for networks...");
+            networks = self.scan_internal().await?;
+            
+            // 2. 检查结果
+            if networks.is_empty() {
+                // 3. 如果为空，打印日志，等待 10 秒后重试
+                tracing::warn!("Scan returned no networks. Retrying scan in 10 seconds... (Check dmesg for driver/firmware errors)");
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                continue; // 回到 loop 顶部，再次执行 scan_internal
+            }
+            
+            // 4. 如果 networks 不是空的，跳出循环
+            tracing::info!("Scan successful, found {} networks.", networks.len());
+            break;
         }
+
+        // 5. 只有在成功扫描后，才启动 AP
         self.start_ap().await?;
         Ok(networks)
     }
 
-    /// 公共方法：连接到指定网络
+    /// 公共方法：连接到指定网络（轮询模式）
     pub async fn connect(&self, req: &ConnectionRequest) -> Result<()> {
         // 停止 AP
         let _ = self.stop_ap().await;
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-
-        // 订阅事件
-        let mut rx = self.event_tx.subscribe();
 
         tracing::debug!("Adding new network...");
         let net_id_str = self.send_cmd("ADD_NETWORK".to_string()).await?;
@@ -394,55 +322,93 @@ impl WpaCtrlBackend {
 
         tracing::debug!(net_id, "Configuring network...");
 
-        // 设置 SSID
-        self.send_cmd(format!("SET_NETWORK {} ssid \"{}\"", net_id, req.ssid)).await?;
+        // BUG 修复：使用 Hex 编码 SSID，以支持所有特殊字符
+        let ssid_hex = hex::encode(&req.ssid);
+        self.send_cmd(format!("SET_NETWORK {} ssid {}", net_id, ssid_hex)).await?;
 
         // 设置密码或开放网络
         if req.password.is_empty() {
             self.send_cmd(format!("SET_NETWORK {} key_mgmt NONE", net_id)).await?;
         } else {
+            // PSK (密码) 仍然使用引号
             self.send_cmd(format!("SET_NETWORK {} psk \"{}\"", net_id, req.password)).await?;
         }
 
         // 启用网络
         self.send_cmd(format!("ENABLE_NETWORK {}", net_id)).await?;
 
-        // 异步等待连接成功事件
-        let fut = async {
-            loop {
-                match rx.recv().await {
-                    Ok(event) => {
-                        if event.contains("CTRL-EVENT-CONNECTED") {
-                            return Ok::<(), anyhow::Error>(());
-                        }
-                        if event.contains("CTRL-EVENT-NETWORK-NOT-FOUND")
-                            || event.contains("CTRL-EVENT-AUTH-REJECT")
-                        {
-                            return Err(anyhow!("Connection failed: {}", event));
-                        }
-                    }
-                    Err(broadcast::error::RecvError::Lagged(_)) => continue,
-                    Err(e) => return Err(anyhow!("recv error: {}", e)),
-                }
-            }
-        };
+        // 轮询 STATUS 命令来检测连接状态
+        tracing::info!(ssid = %req.ssid, "Connecting... Polling status.");
+        let start_time = tokio::time::Instant::now();
+        let timeout = Duration::from_secs(30);
 
-        // 超时
-        match tokio::time::timeout(Duration::from_secs(30), fut).await {
-            Ok(Ok(_)) => {
-                tracing::info!("Connection successful!");
-                // 成功后，可以选择保存配置
-                if self.ap_config.wpa_update_config {
-                    let _ = self.send_cmd("SAVE_CONFIG".to_string()).await;
-                }
-                Ok(())
-            }
-            Ok(Err(e)) => Err(e),
-            Err(_) => {
+        loop {
+            // 1. 检查总超时
+            if start_time.elapsed() > timeout {
+                tracing::error!(ssid = %req.ssid, "Connection timed out after 30s");
                 // 超时：清理网络并尝试恢复 AP
                 let _ = self.send_cmd(format!("REMOVE_NETWORK {}", net_id)).await;
                 let _ = self.start_ap().await;
-                Err(anyhow!("Connection timed out"))
+                return Err(anyhow!("Connection timed out"));
+            }
+
+            // 2. 轮询间隔
+            tokio::time::sleep(Duration::from_secs(2)).await;
+
+            // 3. 获取状态
+            let status_str = match self.send_cmd("STATUS".to_string()).await {
+                Ok(s) => s,
+                Err(e) => {
+                    tracing::warn!("Failed to get STATUS, retrying: {}", e);
+                    continue;
+                }
+            };
+
+            // 4. 解析状态，查找 wpa_state
+            let mut wpa_state = "";
+            for line in status_str.lines() {
+                if let Some((key, value)) = line.split_once('=') {
+                    if key == "wpa_state" {
+                        wpa_state = value;
+                        break;
+                    }
+                }
+            }
+            
+            // 5. 状态机处理
+            match wpa_state {
+                "COMPLETED" => {
+                    tracing::info!(ssid = %req.ssid, "Connection successful (state: COMPLETED)");
+                    // 成功后，可以选择保存配置
+                    if self.ap_config.wpa_update_config {
+                        let _ = self.send_cmd("SAVE_CONFIG".to_string()).await;
+                    }
+                    return Ok(());
+                }
+                "ASSOCIATING" | "ASSOCIATED" | "4WAY_HANDSHAKE" | "GROUP_HANDSHAKE" => {
+                    tracing::debug!("Connection in progress (state: {})...", wpa_state);
+                    continue; // 还在连接中，继续轮询
+                }
+                "SCANNING" => {
+                    tracing::debug!("wpa_supplicant is scanning...");
+                    continue;
+                }
+                "DISCONNECTED" | "INACTIVE" | "INTERFACE_DISABLED" => {
+                    // 刚启动时可能是 DISCONNECTED，给它 5 秒钟反应时间
+                    if start_time.elapsed() < Duration::from_secs(5) {
+                        tracing::debug!("Waiting for initial connection attempt (state: {})...", wpa_state);
+                        continue;
+                    }
+                    // 5 秒后仍然是 DISCONNECTED，说明连接失败
+                    tracing::error!(ssid = %req.ssid, "Connection failed (state: {})", wpa_state);
+                    let _ = self.send_cmd(format!("REMOVE_NETWORK {}", net_id)).await;
+                    let _ = self.start_ap().await;
+                    return Err(anyhow!("Connection failed (state: {})", wpa_state));
+                }
+                _ => {
+                    tracing::warn!("Unknown wpa_state: '{}'", wpa_state);
+                    continue;
+                }
             }
         }
     }

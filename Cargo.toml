@@ -16,6 +16,9 @@ tower-http = { version = "0.6.6", features = ["fs"] }
 # wpa_supplicant 控制接口
 wpa-ctrl = "0.2.1"
 
+# Hex 编码（用于处理特殊字符的 SSID）
+hex = "0.4"
+
 # 序列化与反序列化
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0"
