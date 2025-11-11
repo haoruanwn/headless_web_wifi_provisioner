@@ -41,6 +41,10 @@ impl WpaCtrlBackend {
         Self::ensure_wpa_supplicant_daemon(&config)?;
 
         // 建立用于命令的 WpaController 连接
+        // 清理可能存在的陈旧客户端套接字文件，避免 "Address in use" 错误
+        // wpa_ctrl 库默认在 /tmp 中创建客户端套接字
+        Self::cleanup_stale_wpa_ctrl_sockets()?;
+
         tracing::debug!("Connecting CMD controller to {}", config.interface_name);
         
         let cmd_ctrl = WpaControllerBuilder::new()
@@ -59,6 +63,38 @@ impl WpaCtrlBackend {
 
     pub fn ap_config(&self) -> Arc<ApConfig> {
         self.ap_config.clone()
+    }
+
+    /// 辅助函数：清理陈旧的 wpa_ctrl 客户端套接字文件
+    /// wpa_ctrl 库在 /tmp 中创建客户端套接字，如果程序之前崩溃，
+    /// 这些文件可能会残留下来，导致 "Address in use" 错误
+    fn cleanup_stale_wpa_ctrl_sockets() -> Result<()> {
+        let tmp_path = std::path::Path::new("/tmp");
+        
+        // 尝试清理常见的 wpa_ctrl 套接字文件模式
+        // 包括旧的默认路径和任何与 provisioner 相关的套接字
+        let socket_patterns = vec![
+            "wpa_ctrl_",     // wpa_ctrl 库的默认前缀
+            "provisioner_",   // 我们可能创建的套接字
+        ];
+        
+        if let Ok(entries) = std::fs::read_dir(tmp_path) {
+            for entry in entries.flatten() {
+                let file_name = entry.file_name();
+                let name_str = file_name.to_string_lossy();
+                
+                // 检查是否匹配我们要清理的模式
+                if socket_patterns.iter().any(|pattern| name_str.contains(pattern)) {
+                    let path = entry.path();
+                    match std::fs::remove_file(&path) {
+                        Ok(_) => tracing::debug!("Removed stale socket: {:?}", path),
+                        Err(e) => tracing::warn!("Failed to remove {:?}: {}", path, e),
+                    }
+                }
+            }
+        }
+        
+        Ok(())
     }
 
     /// 辅助函数：确保 wpa_supplicant 在运行
@@ -281,22 +317,44 @@ impl WpaCtrlBackend {
     /// 公共方法：扫描并启动 AP（TDM 模式）
     pub async fn setup_and_scan(&self) -> Result<Vec<Network>> {
         let mut networks;
+        let max_retries = 3;
+        let mut retry_count = 0;
+
         loop {
             // 1. 尝试执行内部扫描
             // (scan_internal 内部已经包含了 10 秒的等待)
-            println!("Attempting to scan for networks...");
+            println!("Attempting to scan for networks (attempt {}/{})...", retry_count + 1, max_retries);
             networks = self.scan_internal().await?;
             
             // 2. 检查结果
             if networks.is_empty() {
-                // 3. 如果为空，打印日志，等待 10 秒后重试
-                tracing::warn!("Scan returned no networks. Retrying scan in 10 seconds... (Check dmesg for driver/firmware errors)");
+                retry_count += 1;
+                // 3. 如果为空，检查是否达到最大重试次数
+                if retry_count >= max_retries {
+                    tracing::error!(
+                        "Scan failed after {} attempts. Check dmesg for driver/firmware errors. Cleaning up and exiting.",
+                        max_retries
+                    );
+                    // 清理 AP 资源并退出
+                    let _ = self.stop_ap().await;
+                    return Err(anyhow!(
+                        "Failed to scan for networks after {} attempts",
+                        max_retries
+                    ));
+                }
+                
+                // 尚未达到最大重试次数，等待后重试
+                tracing::warn!(
+                    "Scan returned no networks. Retrying in 10 seconds... (attempt {}/{}, Check dmesg for driver/firmware errors)",
+                    retry_count,
+                    max_retries
+                );
                 tokio::time::sleep(Duration::from_secs(10)).await;
                 continue; // 回到 loop 顶部，再次执行 scan_internal
             }
             
             // 4. 如果 networks 不是空的，跳出循环
-            tracing::info!("Scan successful, found {} networks.", networks.len());
+            tracing::info!("Scan successful on attempt {}, found {} networks.", retry_count + 1, networks.len());
             break;
         }
 
