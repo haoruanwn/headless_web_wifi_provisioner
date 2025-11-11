@@ -7,11 +7,19 @@ edition = "2024"
 
 [dependencies]
 # 异步运行时
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", default-features = false, features = [
+    "rt-multi-thread", # 对应 #[tokio::main] 和多线程运行时
+    "macros",          # 对应 #[tokio::main]
+    "net",             # 对应 TcpListener (axum 需要)
+    "fs",              # 对应 tokio::fs (backend.rs 中使用)
+    "process",         # 对应 tokio::process::Command (backend.rs 中使用)
+    "sync",            # 对应 tokio::sync::Mutex (backend.rs 中使用)
+    "time",            # 对应 tokio::time::sleep (backend.rs 中使用)
+] }
 
 # Web 框架
 axum = "0.8.6"
-tower-http = { version = "0.6.6", features = ["fs"] }
+tower-http = { version = "0.6.6" }
 
 # wpa_supplicant 控制接口
 wpa-ctrl = "0.2.1"
@@ -31,3 +39,21 @@ anyhow = "1.0"
 # 日志
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# 嵌入 UI 资源
+rust-embed = "8.3.0"
+
+# 异步 Trait 支持
+async-trait = "0.1.79"
+
+# MIME 类型推断
+mime_guess = "2.0.5"
+
+
+# release 配置
+[profile.release]
+opt-level = "z"
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true

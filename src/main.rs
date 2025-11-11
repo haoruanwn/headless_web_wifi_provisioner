@@ -2,6 +2,8 @@ mod backend;
 mod config;
 mod structs;
 mod web_server;
+mod embed;
+mod traits;
 
 use anyhow::Result;
 use backend::WpaCtrlBackend;
