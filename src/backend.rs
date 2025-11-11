@@ -10,7 +10,7 @@ use wpa_ctrl::{WpaController, WpaControllerBuilder};
 
 // 从配置文件加载 AP 配置
 static GLOBAL_AP_CONFIG: Lazy<ApConfig> = Lazy::new(|| {
-    const CONFIG_TOML: &str = include_str!("../config/wpa_dbus.toml");
+    const CONFIG_TOML: &str = include_str!("../config/wpa_ctrl.toml");
     ap_config_from_toml_str(CONFIG_TOML)
 });
 
