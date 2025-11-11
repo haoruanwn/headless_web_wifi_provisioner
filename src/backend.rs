@@ -72,20 +72,20 @@ impl WpaCtrlBackend {
         let tmp_path = std::path::Path::new("/tmp");
         
         // 尝试清理常见的 wpa_ctrl 套接字文件模式
-        // 包括旧的默认路径和任何与 provisioner 相关的套接字
+        // 注意：只清理特定的套接字前缀，避免误删其他文件（如配置文件）
         let socket_patterns = vec![
-            "wpa_ctrl_",     // wpa_ctrl 库的默认前缀
-            "provisioner_",   // 我们可能创建的套接字
+            "wpa_ctrl_",           // wpa_ctrl 库的默认前缀
+            "provisioner_ctrl_",    // 我们创建的唯一套接字前缀
         ];
         
         if let Ok(entries) = std::fs::read_dir(tmp_path) {
             for entry in entries.flatten() {
                 let file_name = entry.file_name();
                 let name_str = file_name.to_string_lossy();
+                let path = entry.path();
                 
-                // 检查是否匹配我们要清理的模式
-                if socket_patterns.iter().any(|pattern| name_str.contains(pattern)) {
-                    let path = entry.path();
+                // 检查是否匹配我们要清理的模式，并且必须是文件而不是目录
+                if socket_patterns.iter().any(|pattern| name_str.starts_with(pattern)) && path.is_file() {
                     match std::fs::remove_file(&path) {
                         Ok(_) => tracing::debug!("Removed stale socket: {:?}", path),
                         Err(e) => tracing::warn!("Failed to remove {:?}: {}", path, e),

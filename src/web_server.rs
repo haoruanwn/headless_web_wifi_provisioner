@@ -41,6 +41,7 @@ pub async fn run_server(
         .route("/api/scan", get(api_scan_tdm))
         .route("/api/connect", post(api_connect_tdm))
         .route("/api/backend_kind", get(api_backend_kind_tdm))
+        .route("/generate_204", get(handle_captive_portal))
         .fallback(get(serve_static_asset))
         .with_state(app_state.clone());
 
@@ -66,23 +67,54 @@ async fn api_backend_kind_tdm() -> impl IntoResponse {
 }
 
 /// 处理连接请求（TDM 模式）
+/// 使用"发送并忘记"(Fire and Forget) 模式：
+/// 立即返回 200 OK，然后在后台执行实际的连接工作。
+/// 这避免了竞争条件：浏览器因为 AP 被关闭而无法接收响应。
 async fn api_connect_tdm(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<ConnectionRequest>,
 ) -> impl IntoResponse {
     tracing::debug!(ssid = %payload.ssid, "Handling /api/connect request (TDM)");
-    match state.backend.connect(&payload).await {
-        Ok(_) => (
-            StatusCode::OK,
-            Json(serde_json::json!({ "status": "success" })),
-        )
-            .into_response(),
-        Err(e) => (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({ "error": e.to_string() })),
-        )
-            .into_response(),
-    }
+
+    // 克隆 backend Arc 以在后台任务中使用
+    let backend_clone = state.backend.clone();
+
+    // 生成后台任务来执行实际的连接工作
+    tokio::spawn(async move {
+        // connect 函数在后台运行，它包含：
+        // 1. 停止 AP
+        // 2. 连接到目标网络
+        // 3. 运行 DHCP 获取 IP
+        // 4. 调用 std::process::exit(0)
+        if let Err(e) = backend_clone.connect(&payload).await {
+            // 如果连接失败，connect 函数会自己重启 AP
+            // 我们只需要记录错误
+            tracing::error!("Background connection task failed: {}", e);
+        }
+    });
+
+    // 立即返回 200 OK，在 AP 关闭之前发送给浏览器
+    // 这样用户就能在手机上看到成功提示，即使设备随后断开 Wi-Fi
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "status": "success",
+            "message": "Connection request received. Device is now switching networks."
+        })),
+    )
+        .into_response()
+}
+
+/// 处理捕获门户检测请求（Captive Portal Detection）
+/// 
+/// 现代智能手机（Android、iOS）在连接到 Wi-Fi 后，会尝试访问已知的
+/// 互联网检验 URL（如 connectivitycheck.gstatic.com/generate_204）来确认
+/// 是否真的有互联网连接。
+///
+/// 我们的 dnsmasq 会劫持这个 DNS 请求并将其指向 192.168.4.1。
+/// 这个处理器以静默方式响应它，避免不必要的日志警告。
+async fn handle_captive_portal() -> impl IntoResponse {
+    (StatusCode::NO_CONTENT, "")
 }
 
 /// 处理静态资产的 Fallback 处理器
