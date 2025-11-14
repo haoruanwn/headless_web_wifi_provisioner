@@ -8,13 +8,13 @@ edition = "2024"
 [dependencies]
 # 异步运行时
 tokio = { version = "1", default-features = false, features = [
-    "rt-multi-thread", # 对应 #[tokio::main] 和多线程运行时
-    "macros",          # 对应 #[tokio::main]
-    "net",             # 对应 TcpListener (axum 需要)
-    "fs",              # 对应 tokio::fs (backend.rs 中使用)
-    "process",         # 对应 tokio::process::Command (backend.rs 中使用)
-    "sync",            # 对应 tokio::sync::Mutex (backend.rs 中使用)
-    "time",            # 对应 tokio::time::sleep (backend.rs 中使用)
+    "rt-multi-thread", 
+    "macros",          
+    "net",             
+    "fs",              
+    "process",         
+    "sync",            
+    "time",            
 ] }
 
 # Web 框架

@@ -14,6 +14,71 @@ static GLOBAL_AP_CONFIG: Lazy<ApConfig> = Lazy::new(|| {
     ap_config_from_toml_str(CONFIG_TOML)
 });
 
+/// 将 wpa_supplicant 输出中的 `\xHH` 转义序列反转义回原始字节。
+/// 主要用于处理扫描结果中 SSID 字段中的汉字等非 ASCII 字符。
+fn unescape_wpa_ssid(s: &str) -> Vec<u8> {
+    fn hex_val(b: u8) -> Option<u8> {
+        match b {
+            b'0'..=b'9' => Some(b - b'0'),
+            b'a'..=b'f' => Some(10 + b - b'a'),
+            b'A'..=b'F' => Some(10 + b - b'A'),
+            _ => None,
+        }
+    }
+
+    let bs = s.as_bytes();
+    let mut out = Vec::with_capacity(bs.len());
+    let mut i = 0;
+    while i < bs.len() {
+        if bs[i] == b'\\' {
+            // 处理转义序列
+            if i + 1 < bs.len() {
+                match bs[i + 1] {
+                    b'x' | b'X' => {
+                        // 期望后面有两个十六进制字符
+                        if i + 3 < bs.len() {
+                            let h1 = bs[i + 2];
+                            let h2 = bs[i + 3];
+                            if let (Some(v1), Some(v2)) = (hex_val(h1), hex_val(h2)) {
+                                out.push((v1 << 4) | v2);
+                                i += 4;
+                                continue;
+                            }
+                        }
+                        // 格式不正确，按字面量保留反斜杠
+                        out.push(b'\\');
+                        i += 1;
+                        continue;
+                    }
+                    b'\\' => {
+                        // 双反斜杠 => 一个反斜杠
+                        out.push(b'\\');
+                        i += 2;
+                        continue;
+                    }
+                    other => {
+                        // 未知的转义序列，保留反斜杠和后面的字符
+                        out.push(b'\\');
+                        out.push(other);
+                        i += 2;
+                        continue;
+                    }
+                }
+            } else {
+                // 字符串以单个 '\' 结尾
+                out.push(b'\\');
+                i += 1;
+                continue;
+            }
+        } else {
+            out.push(bs[i]);
+            i += 1;
+        }
+    }
+
+    out
+}
+
 /// wpa_supplicant 控制套接字后端实现（轮询模式）
 pub struct WpaCtrlBackend {
     ap_config: Arc<ApConfig>,
@@ -196,7 +261,12 @@ impl WpaCtrlBackend {
 
             let signal_dbm: i16 = parts[2].parse().unwrap_or(-100);
             let flags = parts[3];
-            let ssid = parts[4].to_string();
+
+            // wpa_supplicant 对包含非 ASCII 字节的 SSID 会以 `\xHH` 转义序列输出。
+            // 这里将其反转义回原始字节，然后尝试用 UTF-8 解码（使用 from_utf8_lossy 保持健壮性）。
+            let raw_ssid = parts[4];
+            let ssid_bytes = unescape_wpa_ssid(raw_ssid);
+            let ssid = String::from_utf8_lossy(&ssid_bytes).to_string();
 
             if ssid.is_empty() {
                 continue;
