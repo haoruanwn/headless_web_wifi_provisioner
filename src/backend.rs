@@ -99,20 +99,24 @@ impl WpaCtrlBackend {
 
     /// 辅助函数：确保 wpa_supplicant 在运行
     fn ensure_wpa_supplicant_daemon(config: &ApConfig) -> Result<()> {
-        let socket_path = std::path::Path::new(&config.wpa_ctrl_interface)
-            .join(&config.interface_name);
+        tracing::debug!("Ensuring clean state for wpa_supplicant...");
 
-        if socket_path.exists() {
-            tracing::debug!("wpa_supplicant socket found at {:?}. Assuming it's running.", socket_path);
-            return Ok(());
-        }
-
-        tracing::info!("wpa_supplicant socket not found, attempting to start...");
-
-        // 清理残留进程
+        // 关键修改：无论 socket 是否存在，都先强行清理上一次的残留进程
+        // 这修复了"孤儿进程"导致后续运行失败的问题
         let _ = std::process::Command::new("killall")
             .arg("wpa_supplicant")
             .status();
+
+        let socket_path = std::path::Path::new(&config.wpa_ctrl_interface)
+            .join(&config.interface_name);
+
+        // 移除旧的 socket 文件，以防万一
+        if socket_path.exists() {
+            let _ = std::fs::remove_file(&socket_path);
+            tracing::debug!("Removed stale wpa_supplicant socket file.");
+        }
+
+        tracing::info!("Attempting to start wpa_supplicant daemon...");
 
         // 启动 wpa_supplicant 守护进程
         let status = std::process::Command::new("wpa_supplicant")

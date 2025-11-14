@@ -88,8 +88,12 @@ async fn api_connect_tdm(
         // 4. 调用 std::process::exit(0)
         if let Err(e) = backend_clone.connect(&payload).await {
             // 如果连接失败，connect 函数会自己重启 AP
-            // 我们只需要记录错误
+            // 我们只需要记录错误并退出程序
             tracing::error!("Background connection task failed: {}", e);
+            
+            // 链接失败后自动退出程序（状态码 1 表示失败）
+            println!("Connection failed. Shutting down application.");
+            std::process::exit(1);
         }
     });
 
