@@ -995,9 +995,9 @@ checksum = "21a0236b59786fed61e2a80582dd500fe61f18b5dca67a4a067d0bc9039339cf"
 
 [[package]]
 name = "wpa-ctrl"
-version = "0.2.1"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38bca78427e24b4a9ea1a7e0667d24f6fb9d9c5a09827db841b34d873264f2b3"
+checksum = "e509115331de3a8e0afeb39962d441c8ad30a12fb54997400c2137fb961fe2e2"
 dependencies = [
  "str-buf",
 ]

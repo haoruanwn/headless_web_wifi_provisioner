@@ -4,6 +4,8 @@ use async_trait::async_trait;
 use rust_embed::RustEmbed;
 use std::borrow::Cow;
 
+// 用于在二进制文件中嵌入其他资源，例如Web UI和音频文件
+
 #[derive(RustEmbed)]
 #[folder = "ui/"]
 struct Asset;

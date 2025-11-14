@@ -22,7 +22,7 @@ axum = "0.8.6"
 tower-http = { version = "0.6.6" }
 
 # wpa_supplicant 控制接口
-wpa-ctrl = "0.2.1"
+wpa-ctrl = "0.3.0"
 
 # Hex 编码（用于处理特殊字符的 SSID）
 hex = "0.4"
