@@ -1,6 +1,8 @@
-use crate::config::{ApConfig, ap_config_from_toml_str};
+use crate::config::{ApConfig, AppConfig, load_config_from_toml_str};
 use crate::structs::{ConnectionRequest, Network};
+use crate::traits::{AudioEvent, VoiceNotifier};
 use anyhow::{Result, anyhow, Context};
+use async_trait::async_trait;
 use once_cell::sync::Lazy;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -8,10 +10,10 @@ use tokio::fs;
 use tokio::process::Command;
 use wpa_ctrl::{WpaController, WpaControllerBuilder};
 
-// 从配置文件加载 AP 配置
-static GLOBAL_AP_CONFIG: Lazy<ApConfig> = Lazy::new(|| {
+// 从配置文件加载总配置
+static GLOBAL_APP_CONFIG: Lazy<AppConfig> = Lazy::new(|| {
     const CONFIG_TOML: &str = include_str!("../config/wpa_ctrl.toml");
-    ap_config_from_toml_str(CONFIG_TOML)
+    load_config_from_toml_str(CONFIG_TOML)
 });
 
 /// 将 wpa_supplicant 输出中的 `\xHH` 转义序列反转义回原始字节。
@@ -79,46 +81,77 @@ fn unescape_wpa_ssid(s: &str) -> Vec<u8> {
     out
 }
 
+/// 空的语音播报器（不执行任何操作，用于 audio feature 关闭时或配置不完整时）
+struct NullNotifier;
+
+#[async_trait]
+impl VoiceNotifier for NullNotifier {
+    async fn play(&self, _event: AudioEvent) {
+        // Do nothing
+    }
+}
+
 /// wpa_supplicant 控制套接字后端实现（轮询模式）
 pub struct WpaCtrlBackend {
     ap_config: Arc<ApConfig>,
     hostapd: Arc<tokio::sync::Mutex<Option<tokio::process::Child>>>,
     dnsmasq: Arc<tokio::sync::Mutex<Option<tokio::process::Child>>>,
     cmd_ctrl: Arc<Mutex<Option<WpaController>>>,
+    audio_notifier: Arc<dyn VoiceNotifier>,
 }
 
 impl WpaCtrlBackend {
     pub fn new() -> Result<Self> {
-        let config = GLOBAL_AP_CONFIG.clone();
+        let app_config = GLOBAL_APP_CONFIG.clone();
+        let ap_config = Arc::new(app_config.ap.clone());
 
         // 创建 wpa_supplicant 配置文件，使用控制套接字接口
-        let update_config_str = if config.wpa_update_config { "1" } else { "0" };
+        let update_config_str = if ap_config.wpa_update_config { "1" } else { "0" };
         let wpa_conf_content = format!(
             "ctrl_interface=DIR={} GROUP={}\nupdate_config={}\n",
-            config.wpa_ctrl_interface, config.wpa_group, update_config_str
+            ap_config.wpa_ctrl_interface, ap_config.wpa_group, update_config_str
         );
-        std::fs::write(&config.wpa_conf_path, wpa_conf_content.as_bytes())
+        std::fs::write(&ap_config.wpa_conf_path, wpa_conf_content.as_bytes())
             .context("Failed to write wpa_supplicant config")?;
 
-        tracing::info!("Created wpa_supplicant config at: {}", config.wpa_conf_path);
+        tracing::info!("Created wpa_supplicant config at: {}", ap_config.wpa_conf_path);
 
         // 清理过去的状态，启动一个新的 wpa_supplicant 守护进程
-        Self::perform_startup_cleanup(&config)?;
+        Self::perform_startup_cleanup(&ap_config)?;
 
-        tracing::debug!("Connecting CMD controller to {}", config.interface_name);
+        tracing::debug!("Connecting CMD controller to {}", ap_config.interface_name);
         
-        // 告诉 Builder 使用我们已知的、已清理的客户端套接字路径
         let cmd_ctrl = WpaControllerBuilder::new()
-            .open(&config.interface_name)
+            .open(&ap_config.interface_name)
             .context("Failed to connect WpaController socket. Is wpa_supplicant running?")?;
 
         let cmd_ctrl_arc = Arc::new(Mutex::new(Some(cmd_ctrl)));
 
+        // === 创建音频 Notifier ===
+        let audio_notifier = {
+            #[cfg(feature = "audio")]
+            {
+                if let Some(audio_cfg) = &app_config.audio {
+                    tracing::info!("Audio feature enabled.");
+                    Arc::new(crate::audio::AplayNotifier::new(Arc::new(audio_cfg.clone()))) as Arc<dyn VoiceNotifier>
+                } else {
+                    tracing::warn!("Audio feature compiled but no [audio] config found. Disabling audio.");
+                    Arc::new(NullNotifier {}) as Arc<dyn VoiceNotifier>
+                }
+            }
+            
+            #[cfg(not(feature = "audio"))]
+            {
+                Arc::new(NullNotifier {}) as Arc<dyn VoiceNotifier>
+            }
+        };
+
         Ok(Self {
-            ap_config: Arc::new(config),
+            ap_config,
             hostapd: Arc::new(tokio::sync::Mutex::new(None)),
             dnsmasq: Arc::new(tokio::sync::Mutex::new(None)),
             cmd_ctrl: cmd_ctrl_arc,
+            audio_notifier,
         })
     }
 
@@ -454,6 +487,7 @@ impl WpaCtrlBackend {
 
         // 5. 只有在成功扫描后，才启动 AP
         self.start_ap().await?;
+        self.audio_notifier.play(AudioEvent::ApStarted).await;
         Ok(networks)
     }
 
@@ -461,6 +495,7 @@ impl WpaCtrlBackend {
     pub async fn connect(&self, req: &ConnectionRequest) -> Result<()> {
         // 停止 AP
         let _ = self.stop_ap().await;
+        self.audio_notifier.play(AudioEvent::ConnectionStarted).await;
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
         tracing::debug!("Adding new network...");
@@ -494,6 +529,7 @@ impl WpaCtrlBackend {
             // 1. 检查总超时
             if start_time.elapsed() > timeout {
                 tracing::error!(ssid = %req.ssid, "Connection timed out after 30s");
+                self.audio_notifier.play(AudioEvent::ConnectionFailed).await;
                 // 超时：清理网络并尝试恢复 AP
                 let _ = self.send_cmd(format!("REMOVE_NETWORK {}", net_id)).await;
                 let _ = self.start_ap().await;
@@ -531,6 +567,10 @@ impl WpaCtrlBackend {
                     if self.ap_config.wpa_update_config {
                         let _ = self.send_cmd("SAVE_CONFIG".to_string()).await;
                     }
+
+                    // 播放连接成功的音频
+                    self.audio_notifier.play(AudioEvent::ConnectionSuccess).await;
+                    tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
 
                     // 自动运行 DHCP 客户端
                     tracing::info!("Connection complete. Attempting to run DHCP client (udhcpc)...");
@@ -573,6 +613,7 @@ impl WpaCtrlBackend {
                     }
                     // 5 秒后仍然是 DISCONNECTED，说明连接失败
                     tracing::error!(ssid = %req.ssid, "Connection failed (state: {})", wpa_state);
+                    self.audio_notifier.play(AudioEvent::ConnectionFailed).await;
                     let _ = self.send_cmd(format!("REMOVE_NETWORK {}", net_id)).await;
                     let _ = self.start_ap().await;
                     return Err(anyhow!("Connection failed (state: {})", wpa_state));

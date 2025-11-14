@@ -1,4 +1,5 @@
-# AP 基本配置 
+# === AP 配置 ===
+[ap]
 ap_ssid = "Echo-mate"
 ap_psk = "12345678"
 ap_gateway_cidr = "192.168.4.1/24"
@@ -36,3 +37,18 @@ hostapd_wpa_key_mgmt = "WPA-PSK"
 hostapd_wpa_pairwise = "CCMP"
 # RSN 单播密码 (CCMP, TKIP 等)
 hostapd_rsn_pairwise = "CCMP"
+
+# === 语音播报配置 (独立) ===
+# 只有在编译时开启 "audio" feature，此配置项才会生效
+[audio]
+# aplay 声卡设备。设为 "auto" 表示使用系统默认，
+# 或指定设备，例如 "hw:0,0"
+device = "auto"
+
+# 定义事件和音频文件的映射
+# 路径是相对于嵌入的 "audio/" 目录的
+[audio.files]
+ap_started = "ap_started.wav"
+connection_started = "connection_started.wav"
+connection_success = "connection_success.wav"
+connection_failed = "connection_failed.wav"

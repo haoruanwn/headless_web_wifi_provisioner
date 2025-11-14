@@ -14,7 +14,8 @@ tokio = { version = "1", default-features = false, features = [
     "fs",              
     "process",         
     "sync",            
-    "time",            
+    "time",
+    "io-util",
 ] }
 
 # Web 框架
@@ -48,6 +49,11 @@ async-trait = "0.1.79"
 
 # MIME 类型推断
 mime_guess = "2.0.5"
+
+[features]
+default = []
+# 语音播报特性
+audio = []
 
 
 # release 配置

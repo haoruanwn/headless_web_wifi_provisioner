@@ -2,6 +2,30 @@ use serde::Deserialize;
 use std::net::SocketAddr;
 use std::str::FromStr;
 
+/// 顶层应用配置
+#[derive(Debug, Clone)]
+pub struct AppConfig {
+    pub ap: ApConfig,
+    
+    /// 音频配置（仅在 audio feature 开启时有意义）
+    #[cfg(feature = "audio")]
+    pub audio: Option<AudioConfig>,
+}
+
+/// 用于解析 TOML 的临时结构
+#[derive(Deserialize)]
+struct AppConfigFile {
+    /// [ap] 表
+    ap: ApConfigToml,
+    
+    /// [audio] 表（可选）
+    #[cfg(feature = "audio")]
+    #[serde(default)]
+    audio: Option<AudioConfig>,
+}
+
+// ============= AP 配置 =============
+
 /// AP 运行时配置（包含所有网络接口、路径、DHCP 等配置）
 #[derive(Debug, Clone)]
 pub struct ApConfig {
@@ -36,7 +60,7 @@ pub struct ApConfig {
 }
 
 #[derive(Deserialize)]
-struct ApConfigFile {
+struct ApConfigToml {
     ap_ssid: String,
     ap_psk: String,
     ap_gateway_cidr: String,
@@ -59,8 +83,8 @@ struct ApConfigFile {
     hostapd_rsn_pairwise: String,
 }
 
-impl From<ApConfigFile> for ApConfig {
-    fn from(t: ApConfigFile) -> Self {
+impl From<ApConfigToml> for ApConfig {
+    fn from(t: ApConfigToml) -> Self {
         let bind_addr =
             SocketAddr::from_str(&t.ap_bind_addr).expect("Invalid ap_bind_addr in TOML");
         ApConfig {
@@ -88,7 +112,42 @@ impl From<ApConfigFile> for ApConfig {
     }
 }
 
+// ============= 音频配置 (仅当 audio feature 开启时编译) =============
+
+/// 音频播放的文件映射
+#[cfg(feature = "audio")]
+#[derive(Deserialize, Debug, Clone)]
+pub struct AudioFilesConfig {
+    pub ap_started: String,
+    pub connection_started: String,
+    pub connection_success: String,
+    pub connection_failed: String,
+}
+
+/// 音频配置
+#[cfg(feature = "audio")]
+#[derive(Deserialize, Debug, Clone)]
+pub struct AudioConfig {
+    pub device: String,
+    pub files: AudioFilesConfig,
+}
+
+// ============= 配置加载函数 =============
+
+/// 从 TOML 字符串加载应用配置
+pub fn load_config_from_toml_str(s: &str) -> AppConfig {
+    let parsed: AppConfigFile = toml::from_str(s).expect("Failed to parse config TOML");
+
+    AppConfig {
+        ap: ApConfig::from(parsed.ap),
+        
+        #[cfg(feature = "audio")]
+        audio: parsed.audio,
+    }
+}
+
+/// 为向后兼容保留的函数（已弃用）
 pub fn ap_config_from_toml_str(s: &str) -> ApConfig {
-    let parsed: ApConfigFile = toml::from_str(s).expect("Failed to parse AP config TOML");
-    ApConfig::from(parsed)
+    let app_config = load_config_from_toml_str(s);
+    app_config.ap
 }

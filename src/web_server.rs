@@ -153,7 +153,7 @@ async fn serve_static_asset(
             tracing::warn!("Failed to get asset: {} (Error: {})", path, e);
             // 对于 SPA (单页应用) 来说，
             // 更好的做法可能是在找不到文件时重定向回 index.html。
-            // 但对于你这个简单的 UI，返回 404 是清晰且正确的。
+            // 但对于这个简单的 UI，返回 404 是清晰且正确的。
             (StatusCode::NOT_FOUND, "Not Found").into_response()
         }
     }

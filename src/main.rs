@@ -5,6 +5,9 @@ mod web_server;
 mod embed;
 mod traits;
 
+#[cfg(feature = "audio")]
+mod audio;
+
 use anyhow::Result;
 use backend::WpaCtrlBackend;
 use std::sync::Arc;

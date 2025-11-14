@@ -15,6 +15,7 @@ cross build \
    --release \
    --config 'target.armv7-unknown-linux-musleabihf.rustflags=["-C", "target-feature=+crt-static"]'
 ```
+如果要开启音频播报功能，加上`--features "audio"`
 
 ### 运行调试 
 
@@ -47,5 +48,6 @@ RUST_LOG="debug,tower_http=debug" ./provisioner
 
   * [ ] 为 Wi-Fi 自动连接（持久化）提供配置选项。
   * [ ] 添加可选的配网过程语音播报。
+  * [ ] 减少对系统shell命令的依赖，不再依赖hostapd和dnsmsaq这两个系统工具
 
 -----

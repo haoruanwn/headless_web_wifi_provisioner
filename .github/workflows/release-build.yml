@@ -22,6 +22,11 @@ jobs:
             asset_suffix: echo-mate-armv7-musleabihf
             env_rustflags: "-C target-feature=+crt-static"
 
+          - target: armv7-unknown-linux-musleabihf
+            asset_suffix: echo-mate-audio-armv7-musleabihf
+            features: "audio"
+            env_rustflags: "-C target-feature=+crt-static"
+
           # - target: armv7-unknown-linux-musleabihf
           #   asset_suffix: wpa_cli-dnsmasq-armv7-musleabihf
           #   features: "provisioner-daemon/backend_wpa_cli_exclusive,provisioner-daemon/ui_echo_mate"
