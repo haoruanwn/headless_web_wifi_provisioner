@@ -37,16 +37,12 @@ impl WpaCtrlBackend {
 
         tracing::info!("Created wpa_supplicant config at: {}", config.wpa_conf_path);
 
-        // 确保 wpa_supplicant 守护进程在运行
-        Self::ensure_wpa_supplicant_daemon(&config)?;
-
-        // 建立用于命令的 WpaController 连接
-        // 清理可能存在的陈旧客户端套接字文件，避免 "Address in use" 错误
-        // wpa_ctrl 库默认在 /tmp 中创建客户端套接字
-        Self::cleanup_stale_wpa_ctrl_sockets()?;
+        // 执行一个健壮的启动清理，处理上一次 "脏退出" 留下的所有状态
+        Self::perform_startup_cleanup(&config)?;
 
         tracing::debug!("Connecting CMD controller to {}", config.interface_name);
         
+        // 告诉 Builder 使用我们*已知*的、*已清理*的客户端套接字路径
         let cmd_ctrl = WpaControllerBuilder::new()
             .open(&config.interface_name)
             .context("Failed to connect WpaController socket. Is wpa_supplicant running?")?;
@@ -65,60 +61,84 @@ impl WpaCtrlBackend {
         self.ap_config.clone()
     }
 
-    /// 辅助函数：清理陈旧的 wpa_ctrl 客户端套接字文件
-    /// wpa_ctrl 库在 /tmp 中创建客户端套接字，如果程序之前崩溃，
-    /// 这些文件可能会残留下来，导致 "Address in use" 错误
-    fn cleanup_stale_wpa_ctrl_sockets() -> Result<()> {
-        let tmp_path = std::path::Path::new("/tmp");
-        
-        // 尝试清理常见的 wpa_ctrl 套接字文件模式
-        // 注意：只清理特定的套接字前缀，避免误删其他文件（如配置文件）
-        let socket_patterns = vec![
-            "wpa_ctrl_",           // wpa_ctrl 库的默认前缀
-            "provisioner_ctrl_",    // 我们创建的唯一套接字前缀
-        ];
-        
-        if let Ok(entries) = std::fs::read_dir(tmp_path) {
-            for entry in entries.flatten() {
-                let file_name = entry.file_name();
-                let name_str = file_name.to_string_lossy();
-                let path = entry.path();
-                
-                // 检查是否匹配我们要清理的模式，并且必须是文件而不是目录
-                if socket_patterns.iter().any(|pattern| name_str.starts_with(pattern)) && path.is_file() {
-                    match std::fs::remove_file(&path) {
-                        Ok(_) => tracing::debug!("Removed stale socket: {:?}", path),
-                        Err(e) => tracing::warn!("Failed to remove {:?}: {}", path, e),
-                    }
-                }
-            }
-        }
-        
-        Ok(())
-    }
+    /// 一个健壮的启动清理函数，用于处理上一次 "脏退出" 留下的所有状态。
+    /// 这个函数会：
+    /// 1. 杀死所有相关的孤儿进程 (wpa_supplicant, hostapd, dnsmasq)。
+    /// 2. 清理 /tmp 中所有 wpa_ctrl 相关的客户端套接字。
+    /// 3. 清理 wpa_supplicant 服务端套接字。
+    /// 4. 启动一个全新的 wpa_supplicant 守护进程。
+    fn perform_startup_cleanup(config: &ApConfig) -> Result<()> {
+        tracing::debug!("Performing robust startup cleanup...");
 
-    /// 辅助函数：确保 wpa_supplicant 在运行
-    fn ensure_wpa_supplicant_daemon(config: &ApConfig) -> Result<()> {
-        tracing::debug!("Ensuring clean state for wpa_supplicant...");
-
-        // 关键修改：无论 socket 是否存在，都先强行清理上一次的残留进程
-        // 这修复了"孤儿进程"导致后续运行失败的问题
+        // === 1. 杀死所有孤儿进程 ===
+        // 我们使用 -9 (SIGKILL) 来确保它们被强行终止
         let _ = std::process::Command::new("killall")
+            .arg("-9")
             .arg("wpa_supplicant")
             .status();
+        let _ = std::process::Command::new("killall")
+            .arg("-9")
+            .arg("hostapd")
+            .status();
+        let _ = std::process::Command::new("killall")
+            .arg("-9")
+            .arg("dnsmasq")
+            .status();
+        tracing::debug!("Orphan processes terminated.");
+        
+        // 短暂等待，确保进程完全退出，端口/资源被释放
+        std::thread::sleep(Duration::from_millis(500));
 
+        // === 2. 清理 /tmp 中所有 wpa_ctrl 相关的客户端套接字 ===
+        // wpa-ctrl 库在 /tmp 中创建名为 wpa_ctrl_N 或 wpa_crtl_N 的套接字文件
+        // （注意库源码中有个拼写错误：wpa_crtl_）
+        // 我们需要激进地删除所有这类文件以避免 "Address in use" 错误
+        // let tmp_path = std::path::Path::new("/tmp");
+        
+        // if let Ok(entries) = std::fs::read_dir(tmp_path) {
+        //     for entry in entries.flatten() {
+        //         let file_name = entry.file_name();
+        //         let name_str = file_name.to_string_lossy();
+        //         let path = entry.path();
+                
+        //         // 检查是否匹配 wpa_ctrl 相关的模式
+        //         if (name_str.starts_with("wpa_ctrl_") || name_str.starts_with("wpa_crtl_"))
+        //             && path.is_file() 
+        //         {
+        //             match std::fs::remove_file(&path) {
+        //                 Ok(_) => tracing::debug!("Removed stale wpa_ctrl socket: {:?}", path),
+        //                 Err(e) => tracing::warn!("Failed to remove {:?}: {}", path, e),
+        //             }
+        //         }
+        //     }
+        // }
+
+
+        // 清理/tmp/wpa_crtl_1，这个文件是第三方库wpa_ctrl拼写错误产生的
+        let wpa_crtl_1 = std::path::Path::new("/tmp/wpa_crtl_1");
+        if wpa_crtl_1.exists() {
+            match std::fs::remove_file(&wpa_crtl_1) {
+                Ok(_) => tracing::debug!("Removed stale wpa_crtl socket: {:?}", wpa_crtl_1),
+                Err(e) => tracing::warn!("Failed to remove {:?}: {}", wpa_crtl_1, e),
+            }
+        }
+        tracing::debug!("All stale wpa_ctrl client sockets cleaned.");
+
+
+        // === 3. 清理 wpa_supplicant 服务端套接字 ===
+        // 例如：/var/run/wpa_supplicant/wlan0
         let socket_path = std::path::Path::new(&config.wpa_ctrl_interface)
             .join(&config.interface_name);
-
-        // 移除旧的 socket 文件，以防万一
         if socket_path.exists() {
-            let _ = std::fs::remove_file(&socket_path);
-            tracing::debug!("Removed stale wpa_supplicant socket file.");
+            match std::fs::remove_file(&socket_path) {
+                Ok(_) => tracing::debug!("Removed stale server socket: {:?}", socket_path),
+                Err(e) => tracing::warn!("Failed to remove stale server socket {:?}: {}", socket_path, e),
+            }
         }
 
-        tracing::info!("Attempting to start wpa_supplicant daemon...");
 
-        // 启动 wpa_supplicant 守护进程
+        // === 4. 启动一个全新的 wpa_supplicant 守护进程 ===
+        tracing::info!("Attempting to start wpa_supplicant daemon...");
         let status = std::process::Command::new("wpa_supplicant")
             .arg("-B")
             .arg(format!("-i{}", config.interface_name))
@@ -131,7 +151,6 @@ impl WpaCtrlBackend {
             return Err(anyhow!("wpa_supplicant daemon failed to start"));
         }
 
-        // 等待 socket 文件出现
         tracing::info!("wpa_supplicant daemon started. Waiting for socket file...");
         std::thread::sleep(Duration::from_secs(2));
         Ok(())
