@@ -187,6 +187,30 @@ impl WpaCtrlBackend {
         // 短暂等待，确保进程完全退出，端口/资源被释放
         std::thread::sleep(Duration::from_millis(500));
 
+        // === 新增：重置网络接口状态 ===
+        // 这是为了清理 nl80211 驱动中可能残留的"脏"配置
+        // 应对 kill -9 或其他非正常关机导致的状态卡死
+        // 这个操作在嵌入式 Linux 上非常标准
+        tracing::debug!("Resetting interface {} state (down/up)...", config.interface_name);
+        let _ = std::process::Command::new("ip")
+            .arg("link")
+            .arg("set")
+            .arg(&config.interface_name)
+            .arg("down")
+            .status();
+        // 等待驱动响应
+        std::thread::sleep(Duration::from_millis(500));
+        
+        let _ = std::process::Command::new("ip")
+            .arg("link")
+            .arg("set")
+            .arg(&config.interface_name)
+            .arg("up")
+            .status();
+        // 等待接口就绪
+        std::thread::sleep(Duration::from_millis(500));
+        tracing::debug!("Interface state reset complete.");
+        // === 新增结束 ===
 
         // 清理/tmp/wpa_ctrl_1
         let wpa_ctrl_1 = std::path::Path::new("/tmp/wpa_ctrl_1");

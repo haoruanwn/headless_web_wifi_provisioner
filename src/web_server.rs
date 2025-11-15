@@ -85,15 +85,18 @@ async fn api_connect_tdm(
         // 1. 停止 AP
         // 2. 连接到目标网络
         // 3. 运行 DHCP 获取 IP
-        // 4. 调用 std::process::exit(0)
+        // 4. 成功时调用 std::process::exit(0)
+        // 5. 失败时重启 AP 并返回 Err
         if let Err(e) = backend_clone.connect(&payload).await {
             // 如果连接失败，connect 函数会自己重启 AP
-            // 我们只需要记录错误并退出程序
-            tracing::error!("Background connection task failed: {}", e);
-            
-            // 链接失败后自动退出程序（状态码 1 表示失败）
-            println!("Connection failed. Shutting down application.");
-            std::process::exit(1);
+            // 我们只需要记录错误，不需要退出程序
+            // 这样用户可以重新连接 AP 并重试
+            tracing::error!(
+                "Connection failed: {}. AP should have been restarted automatically.",
+                e
+            );
+            // 移除了 std::process::exit(1)，让程序继续运行
+            // Web 服务器会继续接受用户的下一次尝试
         }
     });
 
