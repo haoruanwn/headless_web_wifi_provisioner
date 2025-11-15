@@ -12,7 +12,7 @@ use wpa_ctrl::{WpaController, WpaControllerBuilder};
 
 // 从配置文件加载总配置
 static GLOBAL_APP_CONFIG: Lazy<AppConfig> = Lazy::new(|| {
-    const CONFIG_TOML: &str = include_str!("../config/wpa_ctrl.toml");
+    const CONFIG_TOML: &str = include_str!("../configs.toml");
     load_config_from_toml_str(CONFIG_TOML)
 });
 

@@ -4,3 +4,7 @@ target/
 .idea/
 *.log
 .venv
+tts_env/
+
+# 原始音频文件
+*.mp3

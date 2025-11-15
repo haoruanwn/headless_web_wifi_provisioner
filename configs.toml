@@ -48,7 +48,7 @@ device = "auto"
 # 定义事件和音频文件的映射
 # 路径是相对于嵌入的 "audio/" 目录的
 [audio.files]
-ap_started = "ap_started.wav"
-connection_started = "connection_started.wav"
-connection_success = "connection_success.wav"
-connection_failed = "connection_failed.wav"
+ap_started = "开始配网.wav"
+connection_started = "正在连接.wav"
+connection_success = "连接成功.wav"
+connection_failed = "连接失败，请重新尝试.wav"
