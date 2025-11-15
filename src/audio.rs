@@ -5,9 +5,11 @@ use crate::traits::{AudioEvent, VoiceNotifier};
 use async_trait::async_trait;
 use rust_embed::RustEmbed;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use std::process::Stdio;
+use tokio::time::timeout;
 
 /// 嵌入 audio/ 目录中的音频文件
 #[derive(RustEmbed)]
@@ -49,47 +51,55 @@ impl VoiceNotifier for AplayNotifier {
         };
         let audio_data = asset.data;
 
-        // 启动一个新的异步任务来播放音频，不阻塞主逻辑
-        tokio::spawn(async move {
-            tracing::debug!("Playing audio: {:?}", event);
-            
-            let mut cmd = Command::new("aplay");
-            
-            // 设置声卡设备
-            // 如果是"auto"，则使用默认设备
-            if config.device != "auto" {
-                cmd.arg("-D").arg(&config.device);
+        // 【修改点】不再 tokio::spawn，而是让这个 async fn play 真正 .await 播放过程。
+        // 添加超时保护：最多等待 10 秒钟，防止 aplay 无限期卡住
+        tracing::debug!("Playing audio: {:?}", event);
+        
+        let mut cmd = Command::new("aplay");
+        
+        // 设置声卡设备
+        // 如果是"auto"，则使用默认设备
+        if config.device != "auto" {
+            cmd.arg("-D").arg(&config.device);
+        }
+        
+        // 设置标准输入为管道，丢弃输出
+        cmd.stdin(Stdio::piped())
+           .stdout(Stdio::null())
+           .stderr(Stdio::null());
+        
+        // 启动 aplay 进程
+        let mut child = match cmd.spawn() {
+            Ok(child) => child,
+            Err(e) => {
+                tracing::error!("Failed to spawn aplay: {}", e);
+                return;
             }
-            
-            // 设置标准输入为管道，丢弃输出
-            cmd.stdin(Stdio::piped())
-               .stdout(Stdio::null())
-               .stderr(Stdio::null());
-            
-            // 启动 aplay 进程
-            let mut child = match cmd.spawn() {
-                Ok(child) => child,
-                Err(e) => {
-                    tracing::error!("Failed to spawn aplay: {}", e);
-                    return;
-                }
-            };
+        };
 
-            // 获取 stdin 句柄并写入音频数据
-            if let Some(mut stdin) = child.stdin.take() {
-                if let Err(e) = stdin.write_all(audio_data.as_ref()).await {
-                    tracing::error!("Failed to pipe audio data to aplay: {}", e);
-                }
-                // 关闭 stdin 以让 aplay 知道数据已结束
-                drop(stdin);
+        // 获取 stdin 句柄并写入音频数据
+        if let Some(mut stdin) = child.stdin.take() {
+            if let Err(e) = stdin.write_all(audio_data.as_ref()).await {
+                tracing::error!("Failed to pipe audio data to aplay: {}", e);
             }
+            // 关闭 stdin 以让 aplay 知道数据已结束
+            drop(stdin);
+        }
 
-            // 等待 aplay 进程完成
-            if let Err(e) = child.wait().await {
+        // 等待 aplay 进程完成，但最多 10 秒钟
+        // 这确保即使 aplay 因某种原因卡住，也不会无限期阻塞主流程
+        match timeout(Duration::from_secs(10), child.wait()).await {
+            Ok(Ok(_)) => {
+                tracing::debug!("Audio playback finished normally.");
+            }
+            Ok(Err(e)) => {
                 tracing::error!("aplay process failed: {}", e);
-            } else {
-                tracing::debug!("Audio playback finished.");
             }
-        });
+            Err(_) => {
+                tracing::warn!("Audio playback timeout after 10 seconds. Killing aplay process.");
+                // 尝试杀死卡住的 aplay 进程
+                let _ = child.kill().await;
+            }
+        }
     }
 }

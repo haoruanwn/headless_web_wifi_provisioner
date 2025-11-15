@@ -47,7 +47,7 @@ RUST_LOG="debug,tower_http=debug" ./provisioner
 ## 待实现清单 (Roadmap)
 
   * [ ] 为 Wi-Fi 自动连接（持久化）提供配置选项。
-  * [ ] 添加可选的配网过程语音播报。
+  * [x] 添加可选的配网过程语音播报。
   * [ ] 减少对系统shell命令的依赖，不再依赖hostapd和dnsmsaq这两个系统工具
 
 -----

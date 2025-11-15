@@ -48,7 +48,7 @@ document.addEventListener('DOMContentLoaded', () => {
       el.innerHTML = `
         <div class="network-left">
           <img class="wifi-svg" src="assets/wifi.svg" alt="wifi">
-          <div>
+          <div class="network-info">
             <div class="net-ssid">${escapeHtml(n.ssid)}</div>
             <div class="net-meta">${escapeHtml(n.security || 'Unknown')} • 信号 ${n.signal}%</div>
           </div>
@@ -96,7 +96,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const e = await res.json().catch(()=>({error:'连接失败'}));
         throw new Error(e.error || '连接失败');
       }
-      connectionStatus.textContent = '✓ 请求已接收\n\n设备正在关闭热点并尝试连接...\n\n如果连接成功，设备将重启。\n如果失败，请重新连接此配网 Wi-Fi。';
+      connectionStatus.textContent = '✓ 请求已接收\n\n设备正在关闭热点并尝试连接... \n如果失败，请重新连接此配网 Wi-Fi。';
       connectionStatus.style.color = '#2dd4bf';
       setTimeout(closeModal, 4000);
     }catch(err){

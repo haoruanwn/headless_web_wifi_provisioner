@@ -13,7 +13,6 @@ interface_name = "wlan0"
 dhcp_range = "192.168.4.100,192.168.4.200,12h"
 
 # 自包含的配置文件路径 
-# （使用 /tmp 或 /run 目录，避免依赖 /etc 系统配置）
 hostapd_conf_path = "/tmp/provisioner_hostapd.conf"
 wpa_conf_path = "/tmp/provisioner_wpa.conf"
 
@@ -38,7 +37,7 @@ hostapd_wpa_pairwise = "CCMP"
 # RSN 单播密码 (CCMP, TKIP 等)
 hostapd_rsn_pairwise = "CCMP"
 
-# === 语音播报配置 (独立) ===
+# === 语音播报配置 ===
 # 只有在编译时开启 "audio" feature，此配置项才会生效
 [audio]
 # aplay 声卡设备。设为 "auto" 表示使用系统默认，
