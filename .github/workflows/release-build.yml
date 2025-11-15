@@ -84,72 +84,72 @@ jobs:
 
   # ----------------------------------------------------
   # JOB 2: 创建并发布 (Fan-in)
+  # 使用 'gh release create' 一步到位完成：
+  # 1. 自动生成基于 PR 的 Release Notes
+  # 2. 创建 Release
+  # 3. 上传所有产物
   # ----------------------------------------------------
   create-release:
     name: "Create & Publish Release"
     runs-on: ubuntu-latest
     
-    # --- 不依赖 build-assets Job ---
     # 确保所有构建完成后才运行
     needs: build-assets 
     
     permissions:
-      contents: write # 只需要这个Job有写权限
+      contents: write # gh release create 需要这个权限
 
     steps:
 
       - name: "1. Checkout Repository"
         uses: actions/checkout@v4
 
-      - name: "2. Create Release"
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-            tag_name: ${{ github.ref_name }}
-            release_name: Release ${{ github.ref_name }}
-            draft: false
-            prerelease: false
-
-      # --- 下载所有 Artifacts ---
-      - name: "3. Download All Artifacts"
+      - name: "2. Download All Artifacts"
         uses: actions/download-artifact@v4
         with:
           # 不指定 name，会下载所有 Artifacts
           path: artifacts # 下载到 'artifacts' 文件夹
 
-      # --- 循环上传所有产物 ---
-      - name: "4. Package & Upload All Assets"
+      - name: "3. Create Release, Package UI, and Upload All Assets"
         env:
+          # GITHUB_TOKEN 是自动由 GitHub Actions 提供的
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # 1. 准备 UI 压缩包
           UI_ASSET_NAME="ui-assets-${{ github.ref_name }}.tar.gz"
-          
-          echo "Packaging UI folder into $UI_ASSET_NAME"
-          
-          # -c: 创建 (create)
-          # -z: Gzip 压缩
-          # -f: 文件 (file)
-          # -C .: 切换到当前目录 (workspace 根目录)
-          # ui:   要压缩的文件夹
+          echo "📦 Packaging UI folder into $UI_ASSET_NAME"
           tar -czf $UI_ASSET_NAME -C . ui
           
-          echo "Uploading UI asset: $UI_ASSET_NAME"
-          gh release upload \
-            "${{ github.ref_name }}" \
-            "$UI_ASSET_NAME" \
-            --clobber
+          # 2. 构建产物列表（UI + 二进制文件）
+          declare -a ASSET_LIST=("$UI_ASSET_NAME")
           
-          echo "--- UI asset upload complete ---"
-        
-          echo "--- Starting binary artifact uploads ---"
+          echo "📥 Found artifacts:"
           find artifacts -type f | while read asset_path; do
             asset_name=$(basename "$asset_path")
-            echo "Uploading binary: $asset_name from $asset_path"
-            
-            gh release upload \
-              "${{ github.ref_name }}" \
-              "$asset_path" \
-              --clobber
+            echo "  - $asset_name"
+            ASSET_LIST+=("$asset_path")
+          done
+          
+          # 3. 一次性创建 Release 并上传所有产物
+          # --generate-notes: 自动基于 PR 生成 Release Notes
+          # --title: 指定 Release 标题
+          echo ""
+          echo "🚀 Creating Release ${{ github.ref_name }} with auto-generated notes..."
+          
+          # 这里我们需要构建完整的文件列表作为参数
+          # 方式：先创建数组，再展开
+          gh release create \
+            "${{ github.ref_name }}" \
+            --title "Release ${{ github.ref_name }}" \
+            --generate-notes \
+            "$UI_ASSET_NAME" \
+            $(find artifacts -type f)
+          
+          echo ""
+          echo "✅ Release created successfully!"
+          echo "📤 Assets uploaded:"
+          echo "  - UI assets: $UI_ASSET_NAME"
+          find artifacts -type f | while read asset_path; do
+            asset_name=$(basename "$asset_path")
+            echo "  - Binary: $asset_name"
           done
