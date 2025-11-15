@@ -1,50 +1,20 @@
-mod backend;
-mod config;
-mod structs;
-mod web_server;
-mod embed;
-mod traits;
-
-#[cfg(feature = "audio")]
-mod audio;
-
 use anyhow::Result;
-use backend::WpaCtrlBackend;
-use std::sync::Arc;
+use provisioner::run_provisioner;
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // 初始化日志
+    // 1. 初始化日志（这是入口点的职责）
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    tracing::info!("🚀 Starting provisioner with wpa_ctrl backend...");
-
-    // 创建后端实例
-    let backend = Arc::new(WpaCtrlBackend::new()?);
-
-    // 执行 TDM 启动序列：扫描 -> 启动 AP
-    tracing::info!("📡 Executing initial scan and starting AP...");
-    let initial_networks = match backend.setup_and_scan().await {
-        Ok(networks) => {
-            tracing::info!(
-                "✅ Initial scan complete, found {} networks. AP started.",
-                networks.len()
-            );
-            networks
-        }
-        Err(e) => {
-            tracing::error!("❌ Failed to scan or start AP: {}. Exiting.", e);
-            return Err(e);
-        }
-    };
-
-    // 启动 Web 服务器
-    if let Err(e) = web_server::run_server(backend, initial_networks).await {
-        tracing::error!("❌ Web server failed: {}", e);
+    // 2. 调用库的核心逻辑
+    if let Err(e) = run_provisioner().await {
+        // 3. 处理顶层错误
+        tracing::error!("❌ Provisioner failed: {}", e);
+        // 在这里处理退出码是合适的
+        std::process::exit(1);
     }
 
-    tracing::info!("🛑 Shutting down.");
     Ok(())
 }
