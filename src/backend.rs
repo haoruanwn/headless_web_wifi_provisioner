@@ -91,12 +91,66 @@ impl VoiceNotifier for NullNotifier {
     }
 }
 
+/// 将 IEEE 802.11 信道号转换为频率（MHz）
+/// 支持 2.4 GHz 和 5 GHz 频段
+/// 参考：https://en.wikipedia.org/wiki/List_of_WLAN_channels
+fn channel_to_frequency(channel: u8, hw_mode: &str) -> Option<u32> {
+    match hw_mode {
+        // 2.4 GHz 频段 (802.11b/g/n)
+        "b" | "g" => {
+            if (1..=13).contains(&channel) {
+                // 公式: 2407 + (5 * channel)
+                Some(2407 + (5 * channel as u32))
+            } else if channel == 14 {
+                // 日本特殊频道
+                Some(2484)
+            } else {
+                None
+            }
+        }
+        // 5 GHz 频段 (802.11a/n/ac)
+        "a" => {
+            // 5 GHz 信道更复杂，支持 UNII-1 到 UNII-4
+            match channel {
+                36 => Some(5180),
+                40 => Some(5200),
+                44 => Some(5220),
+                48 => Some(5240),
+                52 => Some(5260),
+                56 => Some(5280),
+                60 => Some(5300),
+                64 => Some(5320),
+                100 => Some(5500),
+                104 => Some(5520),
+                108 => Some(5540),
+                112 => Some(5560),
+                116 => Some(5580),
+                120 => Some(5600),
+                124 => Some(5620),
+                128 => Some(5640),
+                132 => Some(5660),
+                136 => Some(5680),
+                140 => Some(5700),
+                144 => Some(5720),
+                149 => Some(5745),
+                153 => Some(5765),
+                157 => Some(5785),
+                161 => Some(5805),
+                165 => Some(5825),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 /// wpa_supplicant 控制套接字后端实现（轮询模式）
 pub struct WpaCtrlBackend {
     ap_config: Arc<ApConfig>,
     hostapd: Arc<tokio::sync::Mutex<Option<tokio::process::Child>>>,
     dnsmasq: Arc<tokio::sync::Mutex<Option<tokio::process::Child>>>,
     cmd_ctrl: Arc<Mutex<Option<WpaController>>>,
+        ap_net_id: Arc<Mutex<Option<u32>>>,
     audio_notifier: Arc<dyn VoiceNotifier>,
 }
 
@@ -151,6 +205,7 @@ impl WpaCtrlBackend {
             hostapd: Arc::new(tokio::sync::Mutex::new(None)),
             dnsmasq: Arc::new(tokio::sync::Mutex::new(None)),
             cmd_ctrl: cmd_ctrl_arc,
+            ap_net_id: Arc::new(Mutex::new(None)),
             audio_notifier,
         })
     }
@@ -384,35 +439,13 @@ impl WpaCtrlBackend {
             }
         }
 
-        // 生成 hostapd 配置
-        let hostapd_conf = format!(
-            "interface={}\nssid={}\nwpa={}\nwpa_passphrase={}\nhw_mode={}\nchannel={}\nwpa_key_mgmt={}\nwpa_pairwise={}\nrsn_pairwise={}\n",
-            self.ap_config.interface_name,
-            self.ap_config.ssid,
-            self.ap_config.hostapd_wpa,
-            self.ap_config.psk,
-            self.ap_config.hostapd_hw_mode,
-            self.ap_config.hostapd_channel,
-            self.ap_config.hostapd_wpa_key_mgmt,
-            self.ap_config.hostapd_wpa_pairwise,
-            self.ap_config.hostapd_rsn_pairwise
-        );
+        // 使用 wpa_supplicant 控制接口创建 AP 网络（替代 hostapd）
+        if let Err(e) = self.start_ap_internal().await {
+            tracing::error!("Failed to start AP via wpa_supplicant: {}", e);
+            return Err(e);
+        }
 
-        // 写入 hostapd 配置文件
-        fs::write(&self.ap_config.hostapd_conf_path, hostapd_conf.as_bytes()).await?;
-        tracing::debug!(
-            "Created hostapd config at: {}",
-            self.ap_config.hostapd_conf_path
-        );
-
-        // 启动 hostapd
-        let child = Command::new("hostapd")
-            .arg(&self.ap_config.hostapd_conf_path)
-            .arg("-B")
-            .spawn()?;
-        *self.hostapd.lock().await = Some(child);
-
-        // 启动 dnsmasq
+        // 启动 dnsmasq（IP 层）以提供 DHCP 服务
         let ap_ip_only = self.ap_config.gateway_cidr.split('/').next().unwrap_or("");
         let dnsmasq_child = Command::new("dnsmasq")
             .arg(format!("--interface={}", self.ap_config.interface_name))
@@ -424,10 +457,60 @@ impl WpaCtrlBackend {
             .spawn()?;
 
         *self.dnsmasq.lock().await = Some(dnsmasq_child);
-        tracing::info!(
-            "AP started successfully on {}",
-            self.ap_config.interface_name
-        );
+        tracing::info!("AP started successfully on {} (via wpa_supplicant)", self.ap_config.interface_name);
+        Ok(())
+    }
+
+    /// 使用 wpa_supplicant 控制接口创建并启用一个 AP 网络
+    async fn start_ap_internal(&self) -> Result<()> {
+        tracing::debug!("Creating AP network via wpa_supplicant");
+
+        // 1. ADD_NETWORK
+        let add_resp = self.send_cmd("ADD_NETWORK".to_string()).await?;
+        let net_id = add_resp.trim().parse::<u32>().context("Failed to parse ADD_NETWORK response")?;
+
+        tracing::debug!(net_id, "Configuring AP network id");
+
+        // 2. 设置 mode=2 (AP)
+        let _ = self.send_cmd(format!("SET_NETWORK {} mode 2", net_id)).await?;
+
+        // 3. 设置 SSID（使用 hex 编码以支持任意字符）
+        let ssid_hex = hex::encode(&self.ap_config.ssid);
+        let _ = self.send_cmd(format!("SET_NETWORK {} ssid {}", net_id, ssid_hex)).await?;
+
+        // 4. 设置安全性
+        if self.ap_config.psk.is_empty() {
+            let _ = self.send_cmd(format!("SET_NETWORK {} key_mgmt NONE", net_id)).await?;
+        } else {
+            let _ = self.send_cmd(format!("SET_NETWORK {} key_mgmt WPA-PSK", net_id)).await?;
+            // 使用引号包裹 PSK
+            let _ = self.send_cmd(format!("SET_NETWORK {} psk \"{}\"", net_id, self.ap_config.psk)).await?;
+        }
+
+        // 5. 设置频率/信道（如果配置了）
+        if let Some(freq) = channel_to_frequency(self.ap_config.hostapd_channel, &self.ap_config.hostapd_hw_mode) {
+            let _ = self.send_cmd(format!("SET_NETWORK {} freq {}", net_id, freq)).await?;
+            tracing::debug!(
+                channel = self.ap_config.hostapd_channel,
+                freq = freq,
+                "Set AP frequency"
+            );
+        } else {
+            tracing::warn!(
+                channel = self.ap_config.hostapd_channel,
+                hw_mode = %self.ap_config.hostapd_hw_mode,
+                "Could not map channel to frequency, using driver default"
+            );
+        }
+
+        // 6. 启用网络
+        let _ = self.send_cmd(format!("ENABLE_NETWORK {}", net_id)).await?;
+
+        // 7. 记录 net id 以便后续移除
+        let mut guard = self.ap_net_id.lock().unwrap();
+        *guard = Some(net_id);
+        tracing::info!("AP network {} enabled via wpa_supplicant", net_id);
+
         Ok(())
     }
 
@@ -439,6 +522,19 @@ impl WpaCtrlBackend {
         }
         if let Some(mut child) = self.hostapd.lock().await.take() {
             let _ = child.kill().await;
+        }
+
+        // 如果通过 wpa_supplicant 创建了 AP 网络，尝试移除它
+        // 取出当前记录的 network id（先释放锁，再执行 await）
+        let maybe_net_id = {
+            let mut guard = self.ap_net_id.lock().unwrap();
+            let nid = *guard;
+            *guard = None;
+            nid
+        };
+        if let Some(net_id) = maybe_net_id {
+            let _ = self.send_cmd(format!("REMOVE_NETWORK {}", net_id)).await;
+            tracing::debug!("Removed AP network id {}", net_id);
         }
 
         // 移除 IP 地址配置
@@ -459,7 +555,7 @@ impl WpaCtrlBackend {
         }
 
         // 清理 hostapd 配置文件
-        let _ = fs::remove_file(&self.ap_config.hostapd_conf_path).await;
+    let _ = fs::remove_file(&self.ap_config.hostapd_conf_path).await;
 
         tracing::info!("AP stopped on {}", self.ap_config.interface_name);
         Ok(())
