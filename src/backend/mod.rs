@@ -34,7 +34,6 @@ impl VoiceNotifier for NullNotifier {
 /// wpa_supplicant 控制套接字后端实现（轮询模式）
 pub struct WpaCtrlBackend {
     ap_config: Arc<ApConfig>,
-    hostapd: Arc<tokio::sync::Mutex<Option<tokio::process::Child>>>,
     dnsmasq: Arc<tokio::sync::Mutex<Option<tokio::process::Child>>>,
     cmd_ctrl: Arc<Mutex<Option<WpaController>>>,
     ap_net_id: Arc<Mutex<Option<u32>>>,
@@ -89,7 +88,6 @@ impl WpaCtrlBackend {
 
         Ok(Self {
             ap_config,
-            hostapd: Arc::new(tokio::sync::Mutex::new(None)),
             dnsmasq: Arc::new(tokio::sync::Mutex::new(None)),
             cmd_ctrl: cmd_ctrl_arc,
             ap_net_id: Arc::new(Mutex::new(None)),

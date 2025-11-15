@@ -1,5 +1,3 @@
-//! 核心命令执行逻辑和网络连接
-
 use super::WpaCtrlBackend;
 use super::parsing::{parse_scan_results, channel_to_frequency};
 use crate::structs::{Network, ConnectionRequest};
@@ -7,7 +5,6 @@ use crate::traits::AudioEvent;
 use anyhow::{Result, anyhow, Context};
 use std::time::Duration;
 use tokio::process::Command;
-use tokio::fs;
 
 impl WpaCtrlBackend {
     /// 内部函数：发送一个命令并获取回复
@@ -141,19 +138,60 @@ impl WpaCtrlBackend {
         if self.ap_config.psk.is_empty() {
             self.send_cmd(format!("SET_NETWORK {} key_mgmt NONE", net_id)).await?;
         } else {
-            self.send_cmd(format!("SET_NETWORK {} key_mgmt WPA-PSK", net_id)).await?;
-            // 使用引号包裹 PSK
+            // 设置 WPA 协议和加密算法
+            // wpa_supplicant 需要明确知道使用 WPA2 (RSN) 还是 WPA1
+            if self.ap_config.hostapd_wpa == 2 {
+                // RSN = WPA2
+                self.send_cmd(format!("SET_NETWORK {} proto RSN", net_id)).await?; 
+            } else if self.ap_config.hostapd_wpa == 1 {
+                // WPA = WPA1
+                self.send_cmd(format!("SET_NETWORK {} proto WPA", net_id)).await?;
+            } else {
+                // 混合模式或其他
+                self.send_cmd(format!("SET_NETWORK {} proto WPA RSN", net_id)).await?;
+            }
+
+            // 设置密钥管理
+            self.send_cmd(format!(
+                "SET_NETWORK {} key_mgmt {}",
+                net_id, self.ap_config.hostapd_wpa_key_mgmt
+            ))
+            .await?;
+
+            // 设置加密套件 (CCMP/TKIP 等)
+            self.send_cmd(format!(
+                "SET_NETWORK {} pairwise {}",
+                net_id, self.ap_config.hostapd_wpa_pairwise
+            ))
+            .await?;
+
+            // 设置密码
             self.send_cmd(format!("SET_NETWORK {} psk \"{}\"", net_id, self.ap_config.psk)).await?;
         }
 
         // 5. 设置频率/信道（如果配置了）
         if let Some(freq) = channel_to_frequency(self.ap_config.hostapd_channel, &self.ap_config.hostapd_hw_mode) {
-            self.send_cmd(format!("SET_NETWORK {} freq {}", net_id, freq)).await?;
-            tracing::debug!(
-                channel = self.ap_config.hostapd_channel,
-                freq = freq,
-                "Set AP frequency"
-            );
+            // 我们尝试设置频率，但如果失败也不 panic，因为这通常是非致命的。
+            // 某些 wpa_supplicant/driver 组合不支持在 AP 模式下设置频率。
+            let cmd = format!("SET_NETWORK {} freq {}", net_id, freq);
+            match self.send_cmd(cmd).await {
+                Ok(_) => {
+                    tracing::debug!(
+                        channel = self.ap_config.hostapd_channel,
+                        freq = freq,
+                        "Successfully set AP frequency"
+                    );
+                }
+                Err(e) => {
+                    // 仅记录警告，不中断 AP 启动
+                    tracing::warn!(
+                        channel = self.ap_config.hostapd_channel,
+                        freq = freq,
+                        error = %e,
+                        "Failed to set AP frequency (command failed). This is often non-fatal, driver will auto-select channel."
+                    );
+                }
+            }
         } else {
             tracing::warn!(
                 channel = self.ap_config.hostapd_channel,
@@ -177,9 +215,6 @@ impl WpaCtrlBackend {
     pub(super) async fn stop_ap(&self) -> Result<()> {
         // 杀死我们启动的进程
         if let Some(mut child) = self.dnsmasq.lock().await.take() {
-            let _ = child.kill().await;
-        }
-        if let Some(mut child) = self.hostapd.lock().await.take() {
             let _ = child.kill().await;
         }
 
@@ -212,9 +247,6 @@ impl WpaCtrlBackend {
                 return Err(anyhow!("Failed to clean IP: {}", err));
             }
         }
-
-        // 清理 hostapd 配置文件
-        let _ = fs::remove_file(&self.ap_config.hostapd_conf_path).await;
 
         tracing::info!("AP stopped on {}", self.ap_config.interface_name);
         Ok(())

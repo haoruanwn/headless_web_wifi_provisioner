@@ -112,7 +112,7 @@ impl From<ApConfigToml> for ApConfig {
     }
 }
 
-// ============= 音频配置 (仅当 audio feature 开启时编译) =============
+// ============= 音频配置 =============
 
 /// 音频播放的文件映射
 #[cfg(feature = "audio")]
